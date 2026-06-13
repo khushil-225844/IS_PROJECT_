@@ -1,88 +1,97 @@
 <?php
 session_start();
-require 'db_connect.php'; 
+require 'db_connect.php';
 
-// Security Check: Ensure the user is logged in
-if (!isset($_SESSION['logged_in'])) {
-    header("Location: index.php");
-    exit();
+// Check if a specific filter was applied, otherwise show 'All'
+$current_filter = isset($_GET['type']) ? $_GET['type'] : 'All';
+
+// Prepare the SQL based on the filter
+if ($current_filter == 'All') {
+    $sql = "SELECT * FROM rooms WHERE status = 'Available' ORDER BY room_name ASC";
+    $stmt = $conn->prepare($sql);
+} else {
+    $sql = "SELECT * FROM rooms WHERE status = 'Available' AND room_type = ? ORDER BY room_name ASC";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("s", $current_filter);
 }
 
-// Fetch all rooms from the database
-$sql = "SELECT * FROM rooms";
-$result = $conn->query($sql);
+$stmt->execute();
+$rooms_result = $stmt->get_result();
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Available Rooms - Strathmore Booking</title>
+    <title>Browse Rooms - Strathmore</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
-<body class="bg-light">
+<body class="bg-light pb-5">
 
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm">
         <div class="container">
-            <a class="navbar-brand fw-bold" href="dashboard-student.php">Strathmore Booking</a>
-            <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+            <a class="navbar-brand fw-bold" href="#">Strathmore Booking</a>
+            <div class="collapse navbar-collapse justify-content-end">
                 <ul class="navbar-nav">
-                    <li class="nav-item">
-                        <a class="nav-link text-white" href="dashboard-student.php">Back to Dashboard</a>
-                    </li>
+                    <li class="nav-item"><a class="nav-link text-white" href="dashboard-student.php">My Dashboard</a></li>
                 </ul>
             </div>
         </div>
     </nav>
 
     <div class="container mt-5">
-        <h2 class="mb-4">Room Availability</h2>
-        
-        <div class="row g-4">
+        <div class="row mb-4 align-items-center">
+            <div class="col-md-8">
+                <h2 class="fw-bold">Available Campus Spaces</h2>
+                <p class="text-muted">Select a room type to find the perfect study or discussion area.</p>
+            </div>
+            
+            <div class="col-md-4">
+                <form method="GET" action="rooms.php" class="d-flex shadow-sm rounded">
+<select name="type" class="form-select border-primary" onchange="this.form.submit()">
+    <option value="All" <?php if($current_filter == 'All') echo 'selected'; ?>>Show All Spaces</option>
+    <option value="Study Room" <?php if($current_filter == 'Study Room') echo 'selected'; ?>>Study Rooms</option>
+    <option value="Discussion Room" <?php if($current_filter == 'Discussion Room') echo 'selected'; ?>>Discussion Rooms</option>
+    <option value="Computer Room" <?php if($current_filter == 'Computer Room') echo 'selected'; ?>>Computer Rooms</option>
+</select>
+                </form>
+            </div>
+        </div>
+
+        <div class="row">
             <?php
-            // Check if there are rooms in the database
-            if ($result->num_rows > 0) {
-                // Loop through each room and create a Bootstrap card
-                while($room = $result->fetch_assoc()) {
+            if ($rooms_result->num_rows > 0) {
+                while($room = $rooms_result->fetch_assoc()) {
                     
-                    // Determine the badge color based on status
-                    $badgeColor = 'bg-success';
-                    if ($room['status'] == 'Booked') {
-                        $badgeColor = 'bg-danger';
-                    } elseif ($room['status'] == 'Maintenance') {
-                        $badgeColor = 'bg-warning text-dark';
-                    }
+                    // Assign an icon based on room type for better visual UI
+                    $icon = "🏫";
+// Assign an icon based on room type for better visual UI
+$icon = "🏫";
+if ($room['room_type'] == 'Computer Room') $icon = "💻";
+if ($room['room_type'] == 'Discussion Room') $icon = "🗣️";
+if ($room['room_type'] == 'Study Room') $icon = "📚";
 
                     echo "
-                    <div class='col-md-4'>
-                        <div class='card shadow-sm h-100'>
-                            <div class='card-body'>
-                                <div class='d-flex justify-content-between align-items-center mb-2'>
-                                    <h5 class='card-title mb-0'>{$room['room_name']}</h5>
-                                    <span class='badge {$badgeColor}'>{$room['status']}</span>
-                                </div>
-                                <p class='card-text text-muted mb-1'><strong>Type:</strong> {$room['room_type']}</p>
-                                <p class='card-text text-muted mb-3'><strong>Capacity:</strong> {$room['capacity']} people</p>";
-                                
-                    // Only show the "Book Now" button if the room is actually available
-                    if ($room['status'] == 'Available') {
-                        echo "<a href='booking.php?room_id={$room['id']}' class='btn btn-outline-primary w-100'>Book Now</a>";
-                    } else {
-                        echo "<button class='btn btn-secondary w-100' disabled>Unavailable</button>";
-                    }
-
-                    echo "
+                    <div class='col-md-4 mb-4'>
+                        <div class='card shadow-sm border-0 h-100 hover-zoom'>
+                            <div class='card-body text-center p-4'>
+                                <div class='fs-1 mb-3'>{$icon}</div>
+                                <h4 class='fw-bold mb-1'>{$room['room_name']}</h4>
+                                <span class='badge bg-primary mb-3'>{$room['room_type']}</span>
+                                <p class='text-muted small mb-4'>Capacity: <strong>{$room['capacity']} Seats</strong></p>
+                                <a href='booking.php?room_id={$room['id']}' class='btn btn-outline-primary w-100 fw-bold'>Select & Book</a>
                             </div>
                         </div>
                     </div>";
                 }
             } else {
-                echo "<div class='col-12'><p>No rooms found in the system.</p></div>";
+                echo "<div class='col-12 text-center py-5'>
+                        <h4 class='text-muted'>No spaces found for '{$current_filter}'.</h4>
+                        <a href='rooms.php' class='btn btn-link mt-2'>View all rooms</a>
+                      </div>";
             }
             ?>
         </div>
     </div>
-
 </body>
 </html>

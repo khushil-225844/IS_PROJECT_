@@ -43,7 +43,11 @@
                     </select>
                 </div>
                 
-                <button type="submit" class="btn btn-primary w-100 py-2 fw-bold">Login</button>
+                <button type="submit" class="btn btn-primary w-100 fw-bold">Login</button>
+            
+                <div class="text-center mt-3">
+                <a href="forgot_password.php" class="text-decoration-none small text-muted">Forgot your password?</a>
+                </div>            
             </form>
             
         </div>
