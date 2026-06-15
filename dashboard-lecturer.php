@@ -19,22 +19,38 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['role'] !== 'lecturer') {
 </head>
 <body class="bg-light">
 
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm">
+<?php
+        // Determine user role for dynamic styling and links
+        $nav_bg = ($_SESSION['role'] === 'lecturer') ? 'bg-dark' : 'bg-primary';
+        $dash_link = ($_SESSION['role'] === 'lecturer') ? 'dashboard-lecturer.php' : 'dashboard-student.php';
+        $brand_text = ($_SESSION['role'] === 'lecturer') ? 'Strathmore Faculty' : 'Strathmore Booking';
+    ?>
+    <nav class="navbar navbar-expand-lg navbar-dark <?php echo $nav_bg; ?> shadow-sm mb-4">
         <div class="container">
-            <a class="navbar-brand fw-bold" href="#">Strathmore Faculty</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <a class="navbar-brand fw-bold" href="<?php echo $dash_link; ?>"><?php echo $brand_text; ?></a>
+            
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav">
                 <span class="navbar-toggler-icon"></span>
             </button>
-            <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
-                <ul class="navbar-nav">
+            
+            <div class="collapse navbar-collapse justify-content-end" id="mainNav">
+                <ul class="navbar-nav align-items-center">
                     <li class="nav-item">
-                        <a class="nav-link text-white fw-bold" href="logout.php">Logout</a>
+                        <a class="nav-link text-white px-3" href="<?php echo $dash_link; ?>">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white px-3" href="rooms.php">Reserve Space</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white px-3" href="my_bookings.php">My History</a>
+                    </li>
+                    <li class="nav-item ms-lg-3">
+                        <a class="btn btn-danger btn-sm fw-bold px-3 py-2" href="logout.php">Logout</a>
                     </li>
                 </ul>
             </div>
         </div>
     </nav>
-
     <div class="container mt-5">
         <div class="row">
             <div class="col-12">

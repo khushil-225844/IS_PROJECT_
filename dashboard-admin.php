@@ -10,20 +10,29 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['role'] !== 'admin') {
 
 require 'db_connect.php';
 
-// --- AUTO-CANCELLATION ENGINE ---
-// Find any booking for today that is still 'Confirmed', where the start time was more than 15 minutes ago, and change it to 'Cancelled (No-Show)'
-// --- AUTO-CANCELLATION ENGINE (UPGRADED) ---
-// Find any 'Confirmed' booking that is either from a past date, OR from today but more than 15 minutes old.
+// --- BULLETPROOF AUTO-CANCELLATION ENGINE ---
+// 1. Force the server to lock onto your exact local time
+date_default_timezone_set('Africa/Nairobi'); 
+
+$current_date = date('Y-m-d');
+$current_time = date('H:i:s');
+
+// 2. The logic: Cancel if the date is in the past, OR if it is today but (Start Time + 15 mins) is earlier than right now.
 $cleanup_sql = "UPDATE bookings 
                 SET status = 'Cancelled (No-Show)' 
                 WHERE status = 'Confirmed' 
                 AND (
-                    booking_date < CURDATE() 
+                    booking_date < ? 
                     OR 
-                    (booking_date = CURDATE() AND start_time < SUBTIME(CURTIME(), '00:15:00'))
+                    (booking_date = ? AND ADDTIME(start_time, '00:15:00') < ?)
                 )";
-$conn->query($cleanup_sql);
-// ------------------------------------
+                
+$stmt = $conn->prepare($cleanup_sql);
+if ($stmt) {
+    $stmt->bind_param("sss", $current_date, $current_date, $current_time);
+    $stmt->execute();
+}
+// ------------------------------------------------
 
 // --- Analytics Queries ---
 
@@ -58,13 +67,27 @@ $recent_bookings = $conn->query($recent_sql);
 </head>
 <body class="bg-light">
 
-    <nav class="navbar navbar-expand-lg navbar-dark bg-danger shadow-sm">
+<nav class="navbar navbar-expand-lg navbar-dark bg-danger shadow-sm mb-4">
         <div class="container">
-            <a class="navbar-brand fw-bold" href="#">Strathmore Admin</a>
-            <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
-                <ul class="navbar-nav">
+            <a class="navbar-brand fw-bold" href="dashboard-admin.php">Strathmore Admin</a>
+            
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#adminNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <div class="collapse navbar-collapse justify-content-end" id="adminNav">
+                <ul class="navbar-nav align-items-center">
                     <li class="nav-item">
-                        <a class="nav-link text-white fw-bold" href="logout.php">Logout</a>
+                        <a class="nav-link text-white px-3" href="dashboard-admin.php">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white px-3" href="manage_rooms.php">Manage Rooms</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white px-3" href="scan.php">QR Scanner</a>
+                    </li>
+                    <li class="nav-item ms-lg-3">
+                        <a class="btn btn-dark btn-sm fw-bold px-3 py-2" href="logout.php">Logout</a>
                     </li>
                 </ul>
             </div>
