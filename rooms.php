@@ -28,17 +28,38 @@ $rooms_result = $stmt->get_result();
 </head>
 <body class="bg-light pb-5">
 
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm">
+<?php
+        // Determine user role for dynamic styling and links
+        $nav_bg = ($_SESSION['role'] === 'lecturer') ? 'bg-dark' : 'bg-primary';
+        $dash_link = ($_SESSION['role'] === 'lecturer') ? 'dashboard-lecturer.php' : 'dashboard-student.php';
+        $brand_text = ($_SESSION['role'] === 'lecturer') ? 'Strathmore Faculty' : 'Strathmore Booking';
+    ?>
+    <nav class="navbar navbar-expand-lg navbar-dark <?php echo $nav_bg; ?> shadow-sm mb-4">
         <div class="container">
-            <a class="navbar-brand fw-bold" href="#">Strathmore Booking</a>
-            <div class="collapse navbar-collapse justify-content-end">
-                <ul class="navbar-nav">
-                    <li class="nav-item"><a class="nav-link text-white" href="dashboard-student.php">My Dashboard</a></li>
+            <a class="navbar-brand fw-bold" href="<?php echo $dash_link; ?>"><?php echo $brand_text; ?></a>
+            
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <div class="collapse navbar-collapse justify-content-end" id="mainNav">
+                <ul class="navbar-nav align-items-center">
+                    <li class="nav-item">
+                        <a class="nav-link text-white px-3" href="<?php echo $dash_link; ?>">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white px-3" href="rooms.php">Reserve Space</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white px-3" href="my_bookings.php">My History</a>
+                    </li>
+                    <li class="nav-item ms-lg-3">
+                        <a class="btn btn-danger btn-sm fw-bold px-3 py-2" href="logout.php">Logout</a>
+                    </li>
                 </ul>
             </div>
         </div>
     </nav>
-
     <div class="container mt-5">
         <div class="row mb-4 align-items-center">
             <div class="col-md-8">

@@ -76,13 +76,28 @@ $rooms_result = $conn->query($rooms_sql);
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body class="bg-light">
-
-    <nav class="navbar navbar-expand-lg navbar-dark bg-danger shadow-sm">
+<nav class="navbar navbar-expand-lg navbar-dark bg-danger shadow-sm mb-4">
         <div class="container">
             <a class="navbar-brand fw-bold" href="dashboard-admin.php">Strathmore Admin</a>
-            <div class="collapse navbar-collapse justify-content-end">
-                <ul class="navbar-nav">
-                    <li class="nav-item"><a class="nav-link text-white" href="dashboard-admin.php">Back to Dashboard</a></li>
+            
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#adminNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <div class="collapse navbar-collapse justify-content-end" id="adminNav">
+                <ul class="navbar-nav align-items-center">
+                    <li class="nav-item">
+                        <a class="nav-link text-white px-3" href="dashboard-admin.php">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white px-3" href="manage_rooms.php">Manage Rooms</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white px-3" href="scan.php">QR Scanner</a>
+                    </li>
+                    <li class="nav-item ms-lg-3">
+                        <a class="btn btn-dark btn-sm fw-bold px-3 py-2" href="logout.php">Logout</a>
+                    </li>
                 </ul>
             </div>
         </div>
