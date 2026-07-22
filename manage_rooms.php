@@ -9,24 +9,43 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['role'] !== 'admin') {
 }
 
 $message = "";
+$admin_id = $_SESSION['user_id']; // For the Audit Log
 
 // Handle Form Submissions
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     
-    // Action 1: Add a Brand New Room
+    // Action 1: Add a Brand New Room (ENTERPRISE UPGRADE)
     if (isset($_POST['action']) && $_POST['action'] == 'add_room') {
         $room_name = trim($_POST['room_name']);
         $capacity = intval($_POST['capacity']);
         $room_type = $_POST['room_type'];
-        $equipment = $_POST['equipment']; // Capture the TV or Projector selection!
+        $equipment = $_POST['equipment']; 
         
-        $sql = "INSERT INTO rooms (room_name, capacity, room_type, equipment, status) VALUES (?, ?, ?, ?, 'Available')";
+        // 1. Insert into the rooms table
+        $sql = "INSERT INTO rooms (room_name, capacity, room_type, status) VALUES (?, ?, ?, 'Available')";
         $stmt = $conn->prepare($sql);
         
         if ($stmt) {
-            $stmt->bind_param("siss", $room_name, $capacity, $room_type, $equipment);
+            $stmt->bind_param("sis", $room_name, $capacity, $room_type);
             if ($stmt->execute()) {
-                $message = "<div class='alert alert-success'>Successfully added {$room_name} with a {$equipment}!</div>";
+                $new_room_id = $conn->insert_id; // Grab the new Room ID
+                
+                // 2. Insert into equipment_inventory table if hardware was selected
+                if ($equipment !== 'None') {
+                    $eq_sql = "INSERT INTO equipment_inventory (room_id, asset_name, status) VALUES (?, ?, 'Functional')";
+                    $eq_stmt = $conn->prepare($eq_sql);
+                    $eq_stmt->bind_param("is", $new_room_id, $equipment);
+                    $eq_stmt->execute();
+                }
+
+                // 3. Security Tracking (Audit Log)
+                $audit_sql = "INSERT INTO audit_logs (user_id, action_type, action_details) VALUES (?, 'ROOM_ADDED', ?)";
+                $audit_stmt = $conn->prepare($audit_sql);
+                $action_details = "Created {$room_type}: {$room_name} (Capacity: {$capacity})";
+                $audit_stmt->bind_param("is", $admin_id, $action_details);
+                $audit_stmt->execute();
+
+                $message = "<div class='alert alert-success'>Successfully added {$room_name} with {$equipment}!</div>";
             } else {
                 $message = "<div class='alert alert-danger'>Error adding room: " . $conn->error . "</div>";
             }
@@ -45,6 +64,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $stmt->bind_param("si", $new_status, $room_id);
         
         if ($stmt->execute()) {
+            // Security Tracking (Audit Log)
+            $audit_sql = "INSERT INTO audit_logs (user_id, action_type, action_details) VALUES (?, 'ROOM_STATUS_UPDATE', ?)";
+            $audit_stmt = $conn->prepare($audit_sql);
+            $action_details = "Updated room ID {$room_id} status to '{$new_status}'";
+            $audit_stmt->bind_param("is", $admin_id, $action_details);
+            $audit_stmt->execute();
+
             $message = "<div class='alert alert-success'>Room status updated successfully!</div>";
         }
     }
@@ -53,18 +79,32 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if (isset($_POST['action']) && $_POST['action'] == 'delete_room') {
         $room_id = intval($_POST['room_id']);
         
+        // Note: Because we used ON DELETE CASCADE in the database schema, 
+        // deleting the room will automatically delete its equipment from the inventory!
         $sql = "DELETE FROM rooms WHERE id = ?";
         $stmt = $conn->prepare($sql);
         $stmt->bind_param("i", $room_id);
         
         if ($stmt->execute()) {
-            $message = "<div class='alert alert-success'>Room permanently deleted from the system!</div>";
+            // Security Tracking (Audit Log)
+            $audit_sql = "INSERT INTO audit_logs (user_id, action_type, action_details) VALUES (?, 'ROOM_DELETED', ?)";
+            $audit_stmt = $conn->prepare($audit_sql);
+            $action_details = "Permanently deleted room ID {$room_id} and its associated hardware.";
+            $audit_stmt->bind_param("is", $admin_id, $action_details);
+            $audit_stmt->execute();
+
+            $message = "<div class='alert alert-success'>Room and equipment permanently deleted from the system!</div>";
         }
     }
 }
 
-// Fetch all current rooms for the table
-$rooms_sql = "SELECT * FROM rooms ORDER BY room_type ASC, room_name ASC";
+// Fetch all current rooms for the table (ENTERPRISE JOIN)
+$rooms_sql = "SELECT rooms.*, 
+              IFNULL(GROUP_CONCAT(equipment_inventory.asset_name SEPARATOR ', '), 'None') as equipment_list 
+              FROM rooms 
+              LEFT JOIN equipment_inventory ON rooms.id = equipment_inventory.room_id 
+              GROUP BY rooms.id 
+              ORDER BY rooms.room_type ASC, rooms.room_name ASC";
 $rooms_result = $conn->query($rooms_sql);
 ?>
 
@@ -90,7 +130,7 @@ $rooms_result = $conn->query($rooms_sql);
                         <a class="nav-link text-white px-3" href="dashboard-admin.php">Dashboard</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link text-white px-3" href="manage_rooms.php">Manage Rooms</a>
+                        <a class="nav-link text-white px-3 fw-bold" href="manage_rooms.php">Manage Rooms</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link text-white px-3" href="scan.php">QR Scanner</a>
@@ -176,10 +216,13 @@ $rooms_result = $conn->query($rooms_sql);
                                         while($room = $rooms_result->fetch_assoc()) {
                                             $badge = ($room['status'] == 'Available') ? 'bg-success' : 'bg-warning text-dark';
                                             
-                                            // Make the hardware highly visible in the table
+                                            // Enterprise Hardware Formatting
                                             $eq_display = "<span class='text-muted'>None</span>";
-                                            if ($room['equipment'] == 'Television') $eq_display = "<strong>📺 TV</strong>";
-                                            if ($room['equipment'] == 'Projector') $eq_display = "<strong>📽️ Projector</strong>";
+                                            if ($room['equipment_list'] !== 'None') {
+                                                $display_str = str_replace('Television', '📺 TV', $room['equipment_list']);
+                                                $display_str = str_replace('Projector', '📽️ Projector', $display_str);
+                                                $eq_display = "<strong>{$display_str}</strong>";
+                                            }
 
                                             echo "<tr>
                                                     <td><strong>{$room['room_name']}</strong></td>

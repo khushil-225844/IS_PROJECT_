@@ -7,10 +7,17 @@ if (!isset($_SESSION['logged_in']) || !in_array($_SESSION['role'], ['student', '
     exit();
 }
 
-$user_role = $_SESSION['role']; // NEW: Grab the role to customize the UI
+$user_role = $_SESSION['role']; 
 $room_id = isset($_GET['room_id']) ? intval($_GET['room_id']) : 0;
 
-$room_sql = "SELECT room_name, capacity, equipment FROM rooms WHERE id = ?";
+// --- ENTERPRISE SQL UPDATE: JOINING ROOMS & INVENTORY ---
+$room_sql = "SELECT rooms.room_name, rooms.capacity, 
+             IFNULL(GROUP_CONCAT(equipment_inventory.asset_name SEPARATOR ', '), 'None') as equipment_list 
+             FROM rooms 
+             LEFT JOIN equipment_inventory ON rooms.id = equipment_inventory.room_id 
+             WHERE rooms.id = ?
+             GROUP BY rooms.id";
+             
 $stmt = $conn->prepare($room_sql);
 $stmt->bind_param("i", $room_id);
 $stmt->execute();
@@ -21,7 +28,7 @@ if (!$room) {
 }
 
 $capacity = $room['capacity'];
-$room_equipment = $room['equipment']; 
+$room_equipment = $room['equipment_list']; // Grabbed from the new joined column
 $occupied_seats = [];
 $date_selected = false;
 $room_locked_for_lecture = false;
@@ -33,6 +40,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
     $start_time = $_POST['start_time'];
     $end_time = $_POST['end_time'];
 
+    // This query is still perfect because the bookings table kept its structure!
     $check_sql = "SELECT seat_number, equipment FROM bookings 
                   WHERE room_id = ? AND booking_date = ? AND status = 'Confirmed' 
                   AND (start_time < ? AND end_time > ?)";
@@ -73,7 +81,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
 </head>
 <body class="bg-light pb-5">
 
-<?php
+    <?php
         // Determine user role for dynamic styling and links
         $nav_bg = ($_SESSION['role'] === 'lecturer') ? 'bg-dark' : 'bg-primary';
         $dash_link = ($_SESSION['role'] === 'lecturer') ? 'dashboard-lecturer.php' : 'dashboard-student.php';
@@ -162,11 +170,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
                             <h5 class="fw-bold mb-3 text-dark">Shared Room Resources</h5>
                             <?php if ($equipment_taken): ?>
                                 <div class="seat occupied eq-btn mx-auto">
-                                    <?php echo ($room_equipment == 'Television') ? '📺' : '📽️'; ?> <?php echo $room_equipment; ?> (Already Reserved)
+                                    <?php echo (strpos($room_equipment, 'Television') !== false) ? '📺' : '📽️'; ?> <?php echo $room_equipment; ?> (Already Reserved)
                                 </div>
                             <?php else: ?>
                                 <div class="seat available eq-btn mx-auto" id="eqButton" onclick="toggleEquipment(this, '<?php echo $room_equipment; ?>')">
-                                    Click to Add <?php echo ($room_equipment == 'Television') ? '📺 Television' : '📽️ Projector'; ?>
+                                    Click to Add <?php echo (strpos($room_equipment, 'Television') !== false) ? '📺 Television' : '📽️ Projector'; ?>
                                 </div>
                             <?php endif; ?>
                             <div class="form-text mt-2 small">Claim this hardware for your session.</div>
@@ -241,7 +249,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
             if (element.classList.contains('selected')) {
                 element.classList.remove('selected');
                 equipmentSelected = 'None';
-                element.innerHTML = "Click to Add " + (eqName == 'Television' ? '📺 Television' : '📽️ Projector');
+                element.innerHTML = "Click to Add " + (eqName.includes('Television') ? '📺 Television' : '📽️ Projector');
             } else {
                 element.classList.add('selected');
                 equipmentSelected = eqName;

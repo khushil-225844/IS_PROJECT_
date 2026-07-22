@@ -15,13 +15,26 @@ header('Content-Disposition: attachment; filename=Strathmore_Facility_Report_' .
 // Open the output stream
 $output = fopen('php://output', 'w');
 
-// Write the column headers for the spreadsheet
-fputcsv($output, array('Booking ID', 'User Email', 'Account Role', 'Room Name', 'Seat Number', 'Date', 'Start Time', 'End Time', 'Status'));
+// Write the upgraded column headers for the spreadsheet
+fputcsv($output, array('Booking ID', 'Username', 'Department', 'Account Role', 'Room Name', 'Seat Number', 'Hardware Booked', 'Date', 'Start Time', 'End Time', 'Status'));
 
-// Fetch every booking, joining the user and room tables to get the readable names
-$sql = "SELECT b.id, u.email, u.role, r.room_name, b.seat_number, b.booking_date, b.start_time, b.end_time, b.status 
+// Fetch every booking, joining all 4 relevant tables to get the readable names
+$sql = "SELECT 
+            b.id, 
+            u.username, 
+            d.department_name,
+            ro.role_name, 
+            r.room_name, 
+            b.seat_number, 
+            b.equipment,
+            b.booking_date, 
+            b.start_time, 
+            b.end_time, 
+            b.status 
         FROM bookings b 
         JOIN users u ON b.user_id = u.id 
+        JOIN roles ro ON u.role_id = ro.id
+        LEFT JOIN departments d ON u.department_id = d.id
         JOIN rooms r ON b.room_id = r.id 
         ORDER BY b.booking_date DESC, b.start_time ASC";
         
@@ -31,13 +44,16 @@ $result = $conn->query($sql);
 while ($row = $result->fetch_assoc()) {
     // Translate Seat 0 into readable text for the report
     $seat_display = ($row['seat_number'] == 0) ? 'ENTIRE ROOM (LECTURE)' : $row['seat_number'];
+    $dept_display = $row['department_name'] ? $row['department_name'] : 'Unassigned';
     
     fputcsv($output, array(
         $row['id'], 
-        $row['email'], 
-        strtoupper($row['role']), 
+        $row['username'], 
+        $dept_display,
+        strtoupper($row['role_name']), 
         $row['room_name'], 
         $seat_display, 
+        $row['equipment'],
         $row['booking_date'], 
         $row['start_time'], 
         $row['end_time'], 

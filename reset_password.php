@@ -48,6 +48,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && $valid_token) {
         $update_stmt->bind_param("si", $hashed_password, $user_id);
         
         if ($update_stmt->execute()) {
+            
+            // --- NEW: ENTERPRISE AUDIT LOG (PASSWORD RESET COMPLETED) ---
+            $audit_sql = "INSERT INTO audit_logs (user_id, action_type, action_details) VALUES (?, 'PASSWORD_RESET_COMPLETED', 'User successfully reset their password via token link')";
+            $audit_stmt = $conn->prepare($audit_sql);
+            $audit_stmt->bind_param("i", $user_id);
+            $audit_stmt->execute();
+            // ------------------------------------------------------------
+
             echo "<script>alert('Password updated successfully! You can now log in.'); window.location.href='index.php';</script>";
             exit();
         } else {

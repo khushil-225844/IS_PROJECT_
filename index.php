@@ -25,23 +25,16 @@
             
             <form action="process_login.php" method="POST">
                 <div class="mb-3">
-                    <label for="email" class="form-label text-secondary fw-bold">Email address</label>
-                    <input type="email" class="form-control" id="email" name="email" placeholder="name@strathmore.edu" required>
+                    <label for="username" class="form-label text-secondary fw-bold">Username</label>
+                    <input type="text" class="form-control" id="username" name="username" placeholder="e.g. StudentJohn" required>
                 </div>
                 
-                <div class="mb-3">
+                <div class="mb-4">
                     <label for="password" class="form-label text-secondary fw-bold">Password</label>
                     <input type="password" class="form-control" id="password" name="password" required>
                 </div>
                 
-                <div class="mb-4">
-                    <label for="role" class="form-label text-secondary fw-bold">Login As:</label>
-                    <select class="form-select" id="role" name="role" required>
-                        <option value="student">Student</option>
-                        <option value="lecturer">Lecturer</option>
-                        <option value="admin">Facility Administrator</option>
-                    </select>
-                </div>
+                <!-- Notice we deleted the Role Dropdown. The Database handles this now! -->
                 
                 <button type="submit" class="btn btn-primary w-100 fw-bold">Login</button>
             

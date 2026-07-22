@@ -2,7 +2,7 @@
 session_start();
 require 'db_connect.php';
 
-// THE NEW, UPGRADED BOUNCER
+// 1. Security Check: Block unauthorized roles
 if (!isset($_SESSION['logged_in']) || !in_array($_SESSION['role'], ['student', 'lecturer'])) {
     header("Location: index.php");
     exit();
@@ -10,6 +10,28 @@ if (!isset($_SESSION['logged_in']) || !in_array($_SESSION['role'], ['student', '
 
 $user_id = $_SESSION['user_id'];
 
+// 2. REAL-TIME AUTO-CANCELLATION SWEEP
+// Lock timezone to Nairobi and cancel any unverified passes older than 15 minutes
+date_default_timezone_set('Africa/Nairobi'); 
+$current_date = date('Y-m-d');
+$current_time = date('H:i:s');
+
+$cleanup_sql = "UPDATE bookings 
+                SET status = 'Cancelled (No-Show)' 
+                WHERE status = 'Confirmed' 
+                AND (
+                    booking_date < ? 
+                    OR 
+                    (booking_date = ? AND ADDTIME(start_time, '00:15:00') < ?)
+                )";
+                
+$cleanup_stmt = $conn->prepare($cleanup_sql);
+if ($cleanup_stmt) {
+    $cleanup_stmt->bind_param("sss", $current_date, $current_date, $current_time);
+    $cleanup_stmt->execute();
+}
+
+// 3. FETCH USER BOOKINGS FROM THE ENTERPRISE DATABASE
 $sql = "SELECT b.id, r.room_name, b.seat_number, b.booking_date, b.start_time, b.end_time, b.status, b.equipment, b.qr_code_path 
         FROM bookings b 
         JOIN rooms r ON b.room_id = r.id 
@@ -36,7 +58,7 @@ if ($stmt) {
 </head>
 <body class="bg-light pb-5">
 
-<?php
+    <?php
         // Determine user role for dynamic styling and links
         $nav_bg = ($_SESSION['role'] === 'lecturer') ? 'bg-dark' : 'bg-primary';
         $dash_link = ($_SESSION['role'] === 'lecturer') ? 'dashboard-lecturer.php' : 'dashboard-student.php';
@@ -59,7 +81,7 @@ if ($stmt) {
                         <a class="nav-link text-white px-3" href="rooms.php">Reserve Space</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link text-white px-3" href="my_bookings.php">My History</a>
+                        <a class="nav-link text-white px-3 fw-bold" href="my_bookings.php">My History</a>
                     </li>
                     <li class="nav-item ms-lg-3">
                         <a class="btn btn-danger btn-sm fw-bold px-3 py-2" href="logout.php">Logout</a>
@@ -77,7 +99,7 @@ if ($stmt) {
             if (isset($result) && $result->num_rows > 0) {
                 while($booking = $result->fetch_assoc()) {
                     
-                    // --- STATUS LOGIC ---
+                    // --- STATUS BADGE LOGIC ---
                     $raw_status = isset($booking['status']) ? $booking['status'] : 'Unknown';
                     
                     $badge_color = "bg-secondary";
@@ -139,5 +161,7 @@ if ($stmt) {
             ?>
         </div>
     </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

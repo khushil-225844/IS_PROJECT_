@@ -10,8 +10,13 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['role'] !== 'admin') {
 // Get global system stats
 $total_users = $conn->query("SELECT COUNT(*) as count FROM users")->fetch_assoc()['count'];
 $total_bookings = $conn->query("SELECT COUNT(*) as count FROM bookings")->fetch_assoc()['count'];
+
 $today = date('Y-m-d');
-$bookings_today = $conn->query("SELECT COUNT(*) as count FROM bookings WHERE booking_date = '$today'")->fetch_assoc()['count'];
+// ENTERPRISE FIX: Only count ACTIVE bookings today, exclude cancelled!
+$bookings_today = $conn->query("SELECT COUNT(*) as count FROM bookings WHERE booking_date = '$today' AND status IN ('Confirmed', 'Checked-In')")->fetch_assoc()['count'];
+
+// NEW: Enterprise Audit Log Count
+$audit_events = $conn->query("SELECT COUNT(*) as count FROM audit_logs")->fetch_assoc()['count'];
 
 // Fetch room utilization data for TODAY
 $rooms_sql = "SELECT id, room_name, capacity, status FROM rooms ORDER BY room_name ASC";
@@ -55,22 +60,28 @@ $rooms_result = $conn->query($rooms_sql);
         </div>
 
         <div class="row mb-4">
-            <div class="col-md-4">
-                <div class="card shadow-sm border-0 bg-primary text-white text-center py-3">
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 bg-primary text-white text-center py-3 h-100">
                     <h2 class="fw-bold mb-0"><?php echo $total_users; ?></h2>
                     <span class="small text-uppercase">Registered Users</span>
                 </div>
             </div>
-            <div class="col-md-4">
-                <div class="card shadow-sm border-0 bg-dark text-white text-center py-3">
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 bg-dark text-white text-center py-3 h-100">
                     <h2 class="fw-bold mb-0"><?php echo $total_bookings; ?></h2>
                     <span class="small text-uppercase">All-Time Bookings</span>
                 </div>
             </div>
-            <div class="col-md-4">
-                <div class="card shadow-sm border-0 bg-warning text-dark text-center py-3">
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 bg-warning text-dark text-center py-3 h-100">
                     <h2 class="fw-bold mb-0"><?php echo $bookings_today; ?></h2>
-                    <span class="small text-uppercase">Active Bookings Today</span>
+                    <span class="small text-uppercase">Active Today</span>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm border-0 bg-danger text-white text-center py-3 h-100">
+                    <h2 class="fw-bold mb-0"><?php echo $audit_events; ?></h2>
+                    <span class="small text-uppercase">Security Events</span>
                 </div>
             </div>
         </div>
@@ -87,12 +98,12 @@ $rooms_result = $conn->query($rooms_sql);
                             $r_id = $room['id'];
                             $capacity = $room['capacity'];
                             
-                            // Check how many individual seats are booked today
-                            $seat_sql = "SELECT COUNT(DISTINCT seat_number) as seats_taken FROM bookings WHERE room_id = $r_id AND booking_date = '$today' AND seat_number > 0";
+                            // ENTERPRISE FIX: Exclude cancelled bookings from the seat count
+                            $seat_sql = "SELECT COUNT(DISTINCT seat_number) as seats_taken FROM bookings WHERE room_id = $r_id AND booking_date = '$today' AND seat_number > 0 AND status IN ('Confirmed', 'Checked-In')";
                             $seats_taken = $conn->query($seat_sql)->fetch_assoc()['seats_taken'];
                             
-                            // Check if a lecturer booked the whole room today (Seat 0)
-                            $lock_sql = "SELECT COUNT(*) as locked FROM bookings WHERE room_id = $r_id AND booking_date = '$today' AND seat_number = 0";
+                            // ENTERPRISE FIX: Exclude cancelled lecture locks
+                            $lock_sql = "SELECT COUNT(*) as locked FROM bookings WHERE room_id = $r_id AND booking_date = '$today' AND seat_number = 0 AND status IN ('Confirmed', 'Checked-In')";
                             $is_locked = $conn->query($lock_sql)->fetch_assoc()['locked'] > 0;
 
                             // Calculate percentages and colors

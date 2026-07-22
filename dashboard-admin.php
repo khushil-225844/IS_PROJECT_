@@ -48,13 +48,13 @@ $total_rooms = $room_query->fetch_assoc()['count'];
 $booking_query = $conn->query("SELECT COUNT(*) as count FROM bookings WHERE status = 'Confirmed'");
 $total_bookings = $booking_query->fetch_assoc()['count'];
 
-// Query D: Fetch the 5 most recent bookings across the entire university
-// Uses JOINs to pull the human-readable room name and user email
-$recent_sql = "SELECT b.id, b.booking_date, b.start_time, b.status, r.room_name, u.email, u.role 
+// Query D: Fetch the 5 most recent bookings across the entire university (ENTERPRISE JOIN UPGRADE)
+$recent_sql = "SELECT b.id, b.booking_date, b.start_time, b.status, r.room_name, u.username, ro.role_name 
                FROM bookings b
                JOIN rooms r ON b.room_id = r.id
                JOIN users u ON b.user_id = u.id
-               ORDER BY b.created_at DESC LIMIT 5";
+               JOIN roles ro ON u.role_id = ro.id
+               ORDER BY b.id DESC LIMIT 5";
 $recent_bookings = $conn->query($recent_sql);
 ?>
 <!DOCTYPE html>
@@ -129,8 +129,8 @@ $recent_bookings = $conn->query($recent_sql);
             </div>
         </div>
 
-
-<div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
                 <h5 class="mb-0 text-danger fw-bold">Recent Booking Activity</h5>
                 <div>
                     <a href="scan.php" class="btn btn-sm btn-success shadow-sm fw-bold me-2">📷 QR Scanner</a>
@@ -154,19 +154,19 @@ $recent_bookings = $conn->query($recent_sql);
                         </thead>
                         <tbody>
                             <?php
-                            if ($recent_bookings->num_rows > 0) {
+                            if ($recent_bookings && $recent_bookings->num_rows > 0) {
                                 while($row = $recent_bookings->fetch_assoc()) {
                                     // Set badge color based on status
                                     $badge = 'bg-success';
-                                    if ($row['status'] == 'Cancelled') $badge = 'bg-danger';
+                                    if (stripos($row['status'], 'Cancel') !== false) $badge = 'bg-danger';
                                     
                                     // Format the date/time
                                     $time_str = date("M j, Y", strtotime($row['booking_date'])) . " @ " . date("g:i A", strtotime($row['start_time']));
                                     
                                     echo "<tr>
                                             <td><small class='text-muted'>#STR-{$row['id']}</small></td>
-                                            <td>{$row['email']}</td>
-                                            <td><span class='badge bg-secondary text-uppercase'>{$row['role']}</span></td>
+                                            <td>{$row['username']}</td>
+                                            <td><span class='badge bg-secondary text-uppercase'>{$row['role_name']}</span></td>
                                             <td><strong>{$row['room_name']}</strong></td>
                                             <td>{$time_str}</td>
                                             <td><span class='badge {$badge}'>{$row['status']}</span></td>

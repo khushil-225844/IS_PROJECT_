@@ -64,6 +64,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         QRcode::png($qr_data, $qr_file_path, QR_ECLEVEL_L, 5);
         
         $conn->query("UPDATE bookings SET qr_code_path = '{$qr_file_path}' WHERE id = {$booking_id}");
+
+        // --- NEW: ENTERPRISE AUDIT LOG (LECTURER) ---
+        $audit_sql = "INSERT INTO audit_logs (user_id, action_type, action_details) VALUES (?, 'ROOM_LOCKED', ?)";
+        $audit_stmt = $conn->prepare($audit_sql);
+        $action_details = "Lecturer locked entire room ID: {$room_id} on {$booking_date}";
+        $audit_stmt->bind_param("is", $user_id, $action_details);
+        $audit_stmt->execute();
+        // --------------------------------------------
+
         echo "<script>alert('Success! Room locked for lecture. Equipment Secured: {$equipment}'); window.location.href='my_bookings.php';</script>";
         exit();
     } 
@@ -107,6 +116,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
 
         $seat_count = count($seat_array);
+
+        // --- NEW: ENTERPRISE AUDIT LOG (STUDENT) ---
+        $audit_sql = "INSERT INTO audit_logs (user_id, action_type, action_details) VALUES (?, 'BOOKING_CREATED', ?)";
+        $audit_stmt = $conn->prepare($audit_sql);
+        $action_details = "Student booked {$seat_count} seat(s) in room ID: {$room_id} on {$booking_date}";
+        $audit_stmt->bind_param("is", $user_id, $action_details);
+        $audit_stmt->execute();
+        // -------------------------------------------
+
         echo "<script>alert('Success! {$seat_count} seats reserved. Equipment Secured: {$equipment}'); window.location.href='my_bookings.php';</script>";
     }
 }
