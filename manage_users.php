@@ -56,7 +56,79 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
     }
 
-    // Action 2: Update User Role (ENTERPRISE UPGRADE)
+    // Action 2: Approve or reject a public signup request.
+    if (isset($_POST['action']) && $_POST['action'] == 'approve_signup') {
+        $request_id = intval($_POST['request_id']);
+        $request_sql = "SELECT id, username, password_hash, requested_role_id, department_id
+                        FROM signup_requests WHERE id = ? AND status = 'Pending'";
+        $request_stmt = $conn->prepare($request_sql);
+        $request_stmt->bind_param("i", $request_id);
+        $request_stmt->execute();
+        $request = $request_stmt->get_result()->fetch_assoc();
+
+        if (!$request) {
+            $message = "<div class='alert alert-danger'>That signup request is no longer pending.</div>";
+        } else {
+            $duplicate_stmt = $conn->prepare("SELECT id FROM users WHERE username = ?");
+            $duplicate_stmt->bind_param("s", $request['username']);
+            $duplicate_stmt->execute();
+
+            if ($duplicate_stmt->get_result()->num_rows > 0) {
+                $message = "<div class='alert alert-danger'>Cannot approve this request because the username already exists.</div>";
+            } else {
+                $conn->begin_transaction();
+                $insert_sql = "INSERT INTO users (role_id, department_id, username, password) VALUES (?, ?, ?, ?)";
+                $insert_stmt = $conn->prepare($insert_sql);
+                $insert_stmt->bind_param("iiss", $request['requested_role_id'], $request['department_id'], $request['username'], $request['password_hash']);
+
+                $review_sql = "UPDATE signup_requests SET status = 'Approved', reviewed_at = NOW(), reviewed_by = ? WHERE id = ? AND status = 'Pending'";
+                $review_stmt = $conn->prepare($review_sql);
+                $review_stmt->bind_param("ii", $admin_id, $request_id);
+
+                $user_created = $insert_stmt->execute();
+                $new_user_id = $conn->insert_id;
+
+                if ($user_created && $review_stmt->execute() && $review_stmt->affected_rows === 1) {
+                    $audit_sql = "INSERT INTO audit_logs (user_id, action_type, action_details) VALUES (?, 'SIGNUP_APPROVED', ?)";
+                    $audit_stmt = $conn->prepare($audit_sql);
+                    $action_details = "Approved signup request for username: {$request['username']} (new user ID: {$new_user_id})";
+                    $audit_stmt->bind_param("is", $admin_id, $action_details);
+
+                    if ($audit_stmt->execute()) {
+                        $conn->commit();
+                        $safe_username = htmlspecialchars($request['username']);
+                        $message = "<div class='alert alert-success'>Approved <b>{$safe_username}</b>. They can now log in.</div>";
+                    } else {
+                        $conn->rollback();
+                        $message = "<div class='alert alert-danger'>The approval could not be completed.</div>";
+                    }
+                } else {
+                    $conn->rollback();
+                    $message = "<div class='alert alert-danger'>The approval could not be completed.</div>";
+                }
+            }
+        }
+    }
+
+    if (isset($_POST['action']) && $_POST['action'] == 'reject_signup') {
+        $request_id = intval($_POST['request_id']);
+        $reject_sql = "UPDATE signup_requests SET status = 'Rejected', reviewed_at = NOW(), reviewed_by = ? WHERE id = ? AND status = 'Pending'";
+        $reject_stmt = $conn->prepare($reject_sql);
+        $reject_stmt->bind_param("ii", $admin_id, $request_id);
+
+        if ($reject_stmt->execute() && $reject_stmt->affected_rows === 1) {
+            $audit_sql = "INSERT INTO audit_logs (user_id, action_type, action_details) VALUES (?, 'SIGNUP_REJECTED', ?)";
+            $audit_stmt = $conn->prepare($audit_sql);
+            $action_details = "Rejected signup request ID: {$request_id}";
+            $audit_stmt->bind_param("is", $admin_id, $action_details);
+            $audit_stmt->execute();
+            $message = "<div class='alert alert-secondary'>Signup request rejected.</div>";
+        } else {
+            $message = "<div class='alert alert-danger'>That signup request is no longer pending.</div>";
+        }
+    }
+
+    // Action 3: Update User Role (ENTERPRISE UPGRADE)
     if (isset($_POST['action']) && $_POST['action'] == 'update_role') {
         $target_user_id = intval($_POST['user_id']);
         $new_role_id = intval($_POST['new_role_id']);
@@ -81,7 +153,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
     }
     
-    // Action 3: Reset Password to Default
+    // Action 4: Reset Password to Default
     if (isset($_POST['action']) && $_POST['action'] == 'reset_password') {
         $target_user_id = intval($_POST['user_id']);
         $default_password = "Strathmore2026!";
@@ -103,7 +175,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
     }
 
-    // Action 4: Delete User
+    // Action 5: Delete User
     if (isset($_POST['action']) && $_POST['action'] == 'delete_user') {
         $target_user_id = intval($_POST['user_id']);
         
@@ -137,6 +209,14 @@ $users_sql = "SELECT users.id, users.username, roles.role_name, departments.depa
               LEFT JOIN departments ON users.department_id = departments.id
               ORDER BY roles.access_level DESC, users.username ASC";
 $users_result = $conn->query($users_sql);
+
+$requests_sql = "SELECT sr.id, sr.username, sr.created_at, r.role_name, d.department_name
+                 FROM signup_requests sr
+                 JOIN roles r ON sr.requested_role_id = r.id
+                 JOIN departments d ON sr.department_id = d.id
+                 WHERE sr.status = 'Pending'
+                 ORDER BY sr.created_at ASC";
+$requests_result = $conn->query($requests_sql);
 ?>
 
 <!DOCTYPE html>
@@ -172,6 +252,47 @@ $users_result = $conn->query($users_sql);
         </div>
 
         <div class="row">
+            <div class="col-12 mb-4">
+                <div class="card shadow-sm border-0">
+                    <div class="card-header bg-warning-subtle py-3 d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0 fw-bold">Pending Signup Requests</h5>
+                        <span class="badge bg-warning text-dark"><?php echo $requests_result->num_rows; ?> pending</span>
+                    </div>
+                    <div class="card-body p-0">
+                        <?php if ($requests_result->num_rows > 0): ?>
+                            <div class="table-responsive">
+                                <table class="table table-hover align-middle mb-0">
+                                    <thead class="table-light"><tr><th>Username</th><th>Department</th><th>Requested role</th><th>Requested</th><th class="text-end">Decision</th></tr></thead>
+                                    <tbody>
+                                        <?php while ($request = $requests_result->fetch_assoc()): ?>
+                                            <tr>
+                                                <td><strong><?php echo htmlspecialchars($request['username']); ?></strong></td>
+                                                <td><?php echo htmlspecialchars($request['department_name']); ?></td>
+                                                <td><span class="badge bg-primary text-uppercase"><?php echo htmlspecialchars($request['role_name']); ?></span></td>
+                                                <td class="text-muted small"><?php echo htmlspecialchars($request['created_at']); ?></td>
+                                                <td class="text-end">
+                                                    <form method="POST" class="d-inline">
+                                                        <input type="hidden" name="action" value="approve_signup">
+                                                        <input type="hidden" name="request_id" value="<?php echo $request['id']; ?>">
+                                                        <button class="btn btn-sm btn-success" type="submit">Approve</button>
+                                                    </form>
+                                                    <form method="POST" class="d-inline" onsubmit="return confirm('Reject this signup request?');">
+                                                        <input type="hidden" name="action" value="reject_signup">
+                                                        <input type="hidden" name="request_id" value="<?php echo $request['id']; ?>">
+                                                        <button class="btn btn-sm btn-outline-danger" type="submit">Reject</button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                        <?php endwhile; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php else: ?>
+                            <p class="text-muted text-center my-4">There are no pending signup requests.</p>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
             <div class="col-md-4 mb-4">
                 <div class="card shadow-sm border-0">
                     <div class="card-header bg-dark text-white fw-bold py-3">

@@ -42,6 +42,10 @@
                 <a href="forgot_password.php" class="text-decoration-none small text-muted">Forgot your password?</a>
                 </div>            
             </form>
+
+            <hr class="my-4">
+            <p class="text-center small text-muted mb-2">New to the system?</p>
+            <a href="signup.php" class="btn btn-outline-primary w-100">Request an Account</a>
             
         </div>
     </div>

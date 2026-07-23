@@ -22,7 +22,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['username'])) {
         $user = $result->fetch_assoc();
         
         // 3. Verify password
-        if ($password === $user['password']) {
+        // Support legacy plain-text records while using secure hashes for all new accounts.
+        if (password_verify($password, $user['password']) || hash_equals($user['password'], $password)) {
             // Set session variables
             $_SESSION['logged_in'] = true;
             $_SESSION['user_id'] = $user['id'];
