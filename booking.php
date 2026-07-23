@@ -1,6 +1,7 @@
 <?php
 session_start();
 require 'db_connect.php';
+date_default_timezone_set('Africa/Nairobi');
 
 if (!isset($_SESSION['logged_in']) || !in_array($_SESSION['role'], ['student', 'lecturer'])) {
     header("Location: index.php");
@@ -33,30 +34,43 @@ $occupied_seats = [];
 $date_selected = false;
 $room_locked_for_lecture = false;
 $equipment_taken = false; 
+$booking_error = '';
+$today = date('Y-m-d');
 
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
-    $date_selected = true;
-    $booking_date = $_POST['booking_date'];
-    $start_time = $_POST['start_time'];
-    $end_time = $_POST['end_time'];
+    $booking_date = $_POST['booking_date'] ?? '';
+    $start_time = $_POST['start_time'] ?? '';
+    $end_time = $_POST['end_time'] ?? '';
+    $requested_start = DateTime::createFromFormat('Y-m-d H:i', "$booking_date $start_time");
+    $requested_end = DateTime::createFromFormat('Y-m-d H:i', "$booking_date $end_time");
 
-    // This query is still perfect because the bookings table kept its structure!
-    $check_sql = "SELECT seat_number, equipment FROM bookings 
-                  WHERE room_id = ? AND booking_date = ? AND status = 'Confirmed' 
-                  AND (start_time < ? AND end_time > ?)";
-    $check_stmt = $conn->prepare($check_sql);
-    $check_stmt->bind_param("isss", $room_id, $booking_date, $end_time, $start_time);
-    $check_stmt->execute();
-    $result = $check_stmt->get_result();
-    
-    while ($row = $result->fetch_assoc()) {
-        if ($row['seat_number'] == 0) {
-            $room_locked_for_lecture = true;
-        }
-        $occupied_seats[] = $row['seat_number'];
+    if (!$requested_start || !$requested_end || $requested_end <= $requested_start) {
+        $booking_error = 'Please choose a valid time range.';
+    } elseif ($start_time < '08:00' || $end_time > '20:00') {
+        $booking_error = 'Bookings are available only between 08:00 and 20:00.';
+    } elseif ($requested_start < new DateTime('now')) {
+        $booking_error = 'Bookings cannot be made for a time that has already passed.';
+    } else {
+        $date_selected = true;
+
+        // This query is still perfect because the bookings table kept its structure!
+        $check_sql = "SELECT seat_number, equipment FROM bookings
+                      WHERE room_id = ? AND booking_date = ? AND status = 'Confirmed'
+                      AND (start_time < ? AND end_time > ?)";
+        $check_stmt = $conn->prepare($check_sql);
+        $check_stmt->bind_param("isss", $room_id, $booking_date, $end_time, $start_time);
+        $check_stmt->execute();
+        $result = $check_stmt->get_result();
         
-        if ($row['equipment'] !== 'None') {
-            $equipment_taken = true;
+        while ($row = $result->fetch_assoc()) {
+            if ($row['seat_number'] == 0) {
+                $room_locked_for_lecture = true;
+            }
+            $occupied_seats[] = $row['seat_number'];
+
+            if ($row['equipment'] !== 'None') {
+                $equipment_taken = true;
+            }
         }
     }
 }
@@ -118,12 +132,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
         <p class="text-muted text-center mb-5">Total Capacity: <?php echo $capacity; ?> Seats</p>
         <div class="card shadow-sm border-0 mb-4 mx-auto" style="max-width: 600px;">
             <div class="card-body p-4">
+                <?php if ($booking_error): ?>
+                    <div class="alert alert-danger mb-3"><?php echo htmlspecialchars($booking_error); ?></div>
+                <?php endif; ?>
                 <form method="POST">
                     <input type="hidden" name="check_time" value="1">
                     <div class="row g-3">
-                        <div class="col-md-4"><input type="date" name="booking_date" class="form-control" value="<?php echo isset($booking_date) ? $booking_date : date('Y-m-d'); ?>" required></div>
-                        <div class="col-md-4"><input type="time" name="start_time" class="form-control" value="<?php echo isset($start_time) ? $start_time : '08:00'; ?>" required></div>
-                        <div class="col-md-4"><input type="time" name="end_time" class="form-control" value="<?php echo isset($end_time) ? $end_time : '10:00'; ?>" required></div>
+                        <div class="col-md-4"><input type="date" name="booking_date" id="booking_date" class="form-control" min="<?php echo $today; ?>" value="<?php echo isset($booking_date) ? htmlspecialchars($booking_date) : $today; ?>" required></div>
+                        <div class="col-md-4"><input type="time" name="start_time" class="form-control" min="08:00" max="20:00" value="<?php echo isset($start_time) ? $start_time : '08:00'; ?>" required></div>
+                        <div class="col-md-4"><input type="time" name="end_time" class="form-control" min="08:00" max="20:00" value="<?php echo isset($end_time) ? $end_time : '10:00'; ?>" required></div>
                     </div>
                     <button type="submit" class="btn btn-dark w-100 mt-3 fw-bold">Check Availability</button>
                 </form>
@@ -198,6 +215,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
         </div>
         <?php endif; ?>
     </div>
+
+    <script>
+        const bookingDate = document.getElementById('booking_date');
+        const startTime = document.querySelector('input[name="start_time"]');
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+        function updateEarliestStartTime() {
+            const currentTime = now.toTimeString().slice(0, 5);
+            startTime.min = bookingDate.value === today && currentTime > '08:00'
+                ? currentTime
+                : '08:00';
+        }
+
+        bookingDate.addEventListener('change', updateEarliestStartTime);
+        updateEarliestStartTime();
+    </script>
 
     <script>
         let selectedSeats = [];

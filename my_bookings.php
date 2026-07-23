@@ -10,6 +10,13 @@ if (!isset($_SESSION['logged_in']) || !in_array($_SESSION['role'], ['student', '
 
 $user_id = $_SESSION['user_id'];
 
+// Booking displacement notices are shown to the affected student on their account.
+$notification_sql = "SELECT id, message, created_at FROM notifications WHERE user_id = ? AND is_read = 0 ORDER BY created_at DESC";
+$notification_stmt = $conn->prepare($notification_sql);
+$notification_stmt->bind_param("i", $user_id);
+$notification_stmt->execute();
+$notifications = $notification_stmt->get_result();
+
 // 2. REAL-TIME AUTO-CANCELLATION SWEEP
 // Lock timezone to Nairobi and cancel any unverified passes older than 15 minutes
 date_default_timezone_set('Africa/Nairobi'); 
@@ -94,6 +101,13 @@ if ($stmt) {
     <div class="container mt-5">
         <h2 class="fw-bold mb-4">My Booking History</h2>
 
+        <?php while ($notification = $notifications->fetch_assoc()): ?>
+            <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                <strong>Booking update:</strong> <?php echo htmlspecialchars($notification['message']); ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        <?php endwhile; ?>
+
         <div class="row">
             <?php
             if (isset($result) && $result->num_rows > 0) {
@@ -114,6 +128,10 @@ if ($stmt) {
                         $badge_color = "bg-success";
                         $display_status = "✅ Booking Verified";
                         $show_qr = true; 
+                    } elseif (stripos($raw_status, 'Lecturer Priority') !== false) {
+                        $badge_color = "bg-danger";
+                        $display_status = "Cancelled (Lecturer Priority)";
+                        $show_qr = false;
                     } elseif (stripos($raw_status, 'Cancel') !== false) {
                         $badge_color = "bg-danger";
                         $display_status = "❌ Cancelled (Time Expired)";
