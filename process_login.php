@@ -45,12 +45,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['username'])) {
             }
             exit();
         } else {
-            // Password incorrect
-            echo "<script>alert('Invalid password.'); window.location.href='index.php';</script>";
+            // Show the failure on the login page after redirecting.
+            $_SESSION['login_error'] = 'Invalid username or password.';
+            $_SESSION['login_username'] = $username;
+            header('Location: index.php');
+            exit();
         }
     } else {
-        // Username not found
-        echo "<script>alert('User not found.'); window.location.href='index.php';</script>";
+        // Use the same message so usernames cannot be guessed.
+        $_SESSION['login_error'] = 'Invalid username or password.';
+        $_SESSION['login_username'] = $username;
+        header('Location: index.php');
+        exit();
     }
 } else {
     // If someone tries to access this page directly without submitting the form

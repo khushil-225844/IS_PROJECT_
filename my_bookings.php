@@ -164,7 +164,21 @@ if ($stmt) {
                     }
 
                     echo "
-                            </div>
+                            </div>";
+
+                    // Cancel button — only shown on bookings awaiting check-in (Confirmed, not yet verified)
+                    if (stripos($raw_status, 'Confirm') !== false) {
+                        echo "
+                            <div class='card-footer bg-white border-0 pb-3 px-3'>
+                                <a href='cancel_booking.php?id={$booking['id']}'
+                                   class='btn btn-outline-danger btn-sm w-100 fw-bold'
+                                   onclick=\"return confirm('Are you sure you want to cancel this booking?');\">
+                                   ❌ Cancel Booking
+                                </a>
+                            </div>";
+                    }
+
+                    echo "
                         </div>
                     </div>";
                 }
