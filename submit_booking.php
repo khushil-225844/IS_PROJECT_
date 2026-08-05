@@ -1,6 +1,7 @@
 <?php
 session_start();
 require 'db_connect.php';
+date_default_timezone_set('Africa/Nairobi');
 
 // Adjust this line if needed based on the library folder setup
 require 'libs/phpqrcode/qrlib.php';
@@ -19,10 +20,29 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $end_time = trim($_POST['end_time']);
     $equipment = isset($_POST['equipment']) ? $_POST['equipment'] : 'None';
 
+    // Do not rely on the browser's date restriction: requests can be forged.
+    $requested_start = DateTime::createFromFormat('Y-m-d H:i', "$booking_date $start_time");
+    $requested_end = DateTime::createFromFormat('Y-m-d H:i', "$booking_date $end_time");
+
+    if (!$requested_start || !$requested_end || $requested_end <= $requested_start) {
+        echo "<script>alert('Please choose a valid booking time range.'); window.history.back();</script>";
+        exit();
+    }
+
+    if ($start_time < '08:00' || $end_time > '20:00') {
+        echo "<script>alert('Bookings are available only between 08:00 and 20:00.'); window.history.back();</script>";
+        exit();
+    }
+
+    if ($requested_start < new DateTime('now')) {
+        echo "<script>alert('Bookings cannot be made for a time that has already passed.'); window.history.back();</script>";
+        exit();
+    }
+
     // ==========================================
     // PRE-CHECK: EQUIPMENT CONFLICT
     // ==========================================
-    if ($equipment !== 'None') {
+    if ($equipment !== 'None' && !($_SESSION['role'] === 'lecturer' && $seat_input === '0')) {
         $eq_check_sql = "SELECT id FROM bookings WHERE room_id = ? AND equipment = ? AND booking_date = ? AND status = 'Confirmed' AND (start_time < ? AND end_time > ?)";
         $eq_check_stmt = $conn->prepare($eq_check_sql);
         $eq_check_stmt->bind_param("issss", $room_id, $equipment, $booking_date, $end_time, $start_time);
@@ -40,21 +60,77 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             die("Security Error: Only lecturers can book entire rooms.");
         }
 
-        $check_sql = "SELECT id FROM bookings WHERE room_id = ? AND booking_date = ? AND status = 'Confirmed' AND (start_time < ? AND end_time > ?)";
-        $check_stmt = $conn->prepare($check_sql);
-        $check_stmt->bind_param("isss", $room_id, $booking_date, $end_time, $start_time);
-        $check_stmt->execute();
-        
-        if ($check_stmt->get_result()->num_rows > 0) {
-            echo "<script>alert('Error: Cannot book the entire room because some seats are already reserved!'); window.history.back();</script>";
+        $conn->begin_transaction();
+
+        try {
+            // A lecturer may take priority over students, but never over another lecturer.
+            $lecturer_conflict_sql = "SELECT b.id
+                FROM bookings b
+                JOIN users u ON b.user_id = u.id
+                JOIN roles ro ON u.role_id = ro.id
+                WHERE b.room_id = ? AND b.booking_date = ? AND b.status = 'Confirmed'
+                AND ro.role_name = 'lecturer' AND (b.start_time < ? AND b.end_time > ?)
+                FOR UPDATE";
+            $lecturer_conflict_stmt = $conn->prepare($lecturer_conflict_sql);
+            $lecturer_conflict_stmt->bind_param("isss", $room_id, $booking_date, $end_time, $start_time);
+            $lecturer_conflict_stmt->execute();
+
+            if ($lecturer_conflict_stmt->get_result()->num_rows > 0) {
+                $conn->rollback();
+                echo "<script>alert('This room is already reserved by another lecturer for that time.'); window.history.back();</script>";
+                exit();
+            }
+
+            $affected_students_sql = "SELECT DISTINCT b.user_id, r.room_name
+                FROM bookings b
+                JOIN users u ON b.user_id = u.id
+                JOIN roles ro ON u.role_id = ro.id
+                JOIN rooms r ON b.room_id = r.id
+                WHERE b.room_id = ? AND b.booking_date = ? AND b.status = 'Confirmed'
+                AND ro.role_name = 'student' AND (b.start_time < ? AND b.end_time > ?)
+                FOR UPDATE";
+            $affected_students_stmt = $conn->prepare($affected_students_sql);
+            $affected_students_stmt->bind_param("isss", $room_id, $booking_date, $end_time, $start_time);
+            $affected_students_stmt->execute();
+            $affected_students = $affected_students_stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+            $cancel_students_sql = "UPDATE bookings b
+                JOIN users u ON b.user_id = u.id
+                JOIN roles ro ON u.role_id = ro.id
+                SET b.status = 'Cancelled (Lecturer Priority)'
+                WHERE b.room_id = ? AND b.booking_date = ? AND b.status = 'Confirmed'
+                AND ro.role_name = 'student' AND (b.start_time < ? AND b.end_time > ?)";
+            $cancel_students_stmt = $conn->prepare($cancel_students_sql);
+            $cancel_students_stmt->bind_param("isss", $room_id, $booking_date, $end_time, $start_time);
+            $cancel_students_stmt->execute();
+
+            $notification_sql = "INSERT INTO notifications (user_id, message) VALUES (?, ?)";
+            $notification_stmt = $conn->prepare($notification_sql);
+            foreach ($affected_students as $student) {
+                $notification_message = "Your {$student['room_name']} booking on {$booking_date} from {$start_time} to {$end_time} was cancelled because the room was reserved for a lecturer. Please book another room.";
+                $notification_stmt->bind_param("is", $student['user_id'], $notification_message);
+                $notification_stmt->execute();
+            }
+
+            $insert_sql = "INSERT INTO bookings (user_id, room_id, seat_number, booking_date, start_time, end_time, status, equipment) VALUES (?, ?, 0, ?, ?, ?, 'Confirmed', ?)";
+            $insert_stmt = $conn->prepare($insert_sql);
+            $insert_stmt->bind_param("iissss", $user_id, $room_id, $booking_date, $start_time, $end_time, $equipment);
+            $insert_stmt->execute();
+            $booking_id = $conn->insert_id;
+
+            $audit_sql = "INSERT INTO audit_logs (user_id, action_type, action_details) VALUES (?, 'ROOM_LOCKED', ?)";
+            $audit_stmt = $conn->prepare($audit_sql);
+            $action_details = "Lecturer locked entire room ID: {$room_id} on {$booking_date}; displaced " . count($affected_students) . " student(s)";
+            $audit_stmt->bind_param("is", $user_id, $action_details);
+            $audit_stmt->execute();
+
+            $conn->commit();
+        } catch (Throwable $exception) {
+            $conn->rollback();
+            error_log('Lecturer-priority booking failed: ' . $exception->getMessage());
+            echo "<script>alert('The booking could not be completed. Please try again.'); window.history.back();</script>";
             exit();
         }
-
-        $insert_sql = "INSERT INTO bookings (user_id, room_id, seat_number, booking_date, start_time, end_time, status, equipment) VALUES (?, ?, 0, ?, ?, ?, 'Confirmed', ?)";
-        $insert_stmt = $conn->prepare($insert_sql);
-        $insert_stmt->bind_param("iissss", $user_id, $room_id, $booking_date, $start_time, $end_time, $equipment);
-        $insert_stmt->execute();
-        $booking_id = $conn->insert_id;
         
         $qr_dir = "qrcodes/";
         if (!is_dir($qr_dir)) { mkdir($qr_dir, 0777, true); }
@@ -64,7 +140,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         QRcode::png($qr_data, $qr_file_path, QR_ECLEVEL_L, 5);
         
         $conn->query("UPDATE bookings SET qr_code_path = '{$qr_file_path}' WHERE id = {$booking_id}");
-        echo "<script>alert('Success! Room locked for lecture. Equipment Secured: {$equipment}'); window.location.href='my_bookings.php';</script>";
+
+        $displaced_count = count($affected_students);
+        $notice = $displaced_count > 0 ? " {$displaced_count} student booking(s) were cancelled and notified." : '';
+        echo "<script>alert('Success! Room locked for lecture. Equipment Secured: {$equipment}.{$notice}'); window.location.href='my_bookings.php';</script>";
         exit();
     } 
     
@@ -107,6 +186,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
 
         $seat_count = count($seat_array);
+
+        // --- NEW: ENTERPRISE AUDIT LOG (STUDENT) ---
+        $audit_sql = "INSERT INTO audit_logs (user_id, action_type, action_details) VALUES (?, 'BOOKING_CREATED', ?)";
+        $audit_stmt = $conn->prepare($audit_sql);
+        $action_details = "Student booked {$seat_count} seat(s) in room ID: {$room_id} on {$booking_date}";
+        $audit_stmt->bind_param("is", $user_id, $action_details);
+        $audit_stmt->execute();
+        // -------------------------------------------
+
         echo "<script>alert('Success! {$seat_count} seats reserved. Equipment Secured: {$equipment}'); window.location.href='my_bookings.php';</script>";
     }
 }

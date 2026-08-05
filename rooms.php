@@ -6,11 +6,24 @@ require 'db_connect.php';
 $current_filter = isset($_GET['type']) ? $_GET['type'] : 'All';
 
 // Prepare the SQL based on the filter
+// Prepare the SQL based on the filter
 if ($current_filter == 'All') {
-    $sql = "SELECT * FROM rooms WHERE status = 'Available' ORDER BY room_name ASC";
+    $sql = "SELECT rooms.*, 
+            IFNULL(GROUP_CONCAT(equipment_inventory.asset_name SEPARATOR ', '), 'None') as equipment_list 
+            FROM rooms 
+            LEFT JOIN equipment_inventory ON rooms.id = equipment_inventory.room_id 
+            WHERE rooms.status = 'Available' 
+            GROUP BY rooms.id 
+            ORDER BY rooms.room_name ASC";
     $stmt = $conn->prepare($sql);
 } else {
-    $sql = "SELECT * FROM rooms WHERE status = 'Available' AND room_type = ? ORDER BY room_name ASC";
+    $sql = "SELECT rooms.*, 
+            IFNULL(GROUP_CONCAT(equipment_inventory.asset_name SEPARATOR ', '), 'None') as equipment_list 
+            FROM rooms 
+            LEFT JOIN equipment_inventory ON rooms.id = equipment_inventory.room_id 
+            WHERE rooms.status = 'Available' AND rooms.room_type = ? 
+            GROUP BY rooms.id 
+            ORDER BY rooms.room_name ASC";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param("s", $current_filter);
 }
@@ -86,11 +99,9 @@ $rooms_result = $stmt->get_result();
                     
                     // Assign an icon based on room type for better visual UI
                     $icon = "🏫";
-// Assign an icon based on room type for better visual UI
-$icon = "🏫";
-if ($room['room_type'] == 'Computer Room') $icon = "💻";
-if ($room['room_type'] == 'Discussion Room') $icon = "🗣️";
-if ($room['room_type'] == 'Study Room') $icon = "📚";
+                    if ($room['room_type'] == 'Computer Room') $icon = "💻";
+                    if ($room['room_type'] == 'Discussion Room') $icon = "🗣️";
+                    if ($room['room_type'] == 'Study Room') $icon = "📚";
 
                     echo "
                     <div class='col-md-4 mb-4'>
@@ -99,20 +110,22 @@ if ($room['room_type'] == 'Study Room') $icon = "📚";
                                 <div class='fs-1 mb-3'>{$icon}</div>
                                 <h4 class='fw-bold mb-1'>{$room['room_name']}</h4>
                                 <span class='badge bg-primary mb-3'>{$room['room_type']}</span>
-                                <p class='text-muted small mb-4'>Capacity: <strong>{$room['capacity']} Seats</strong></p>
+                                <p class='text-muted small mb-4'>
+                                    Capacity: <strong>{$room['capacity']} Seats</strong><br>
+                                    <span class='text-secondary'>Equipment: <strong>{$room['equipment_list']}</strong></span>
+                                </p>
                                 <a href='booking.php?room_id={$room['id']}' class='btn btn-outline-primary w-100 fw-bold'>Select & Book</a>
                             </div>
                         </div>
                     </div>";
-                }
+                } // <-- THIS WAS THE MISSING BRACKET THAT CLOSES THE WHILE LOOP!
             } else {
                 echo "<div class='col-12 text-center py-5'>
                         <h4 class='text-muted'>No spaces found for '{$current_filter}'.</h4>
                         <a href='rooms.php' class='btn btn-link mt-2'>View all rooms</a>
                       </div>";
             }
-            ?>
-        </div>
+            ?>        </div>
     </div>
 </body>
 </html>

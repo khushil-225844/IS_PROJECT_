@@ -31,6 +31,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['booking_id'])) {
             $update_stmt->bind_param("i", $booking_id);
             $update_stmt->execute();
             
+            // --- NEW: ENTERPRISE AUDIT LOG (ADMIN CHECK-IN) ---
+            $admin_id = $_SESSION['user_id'];
+            $audit_sql = "INSERT INTO audit_logs (user_id, action_type, action_details) VALUES (?, 'CHECK_IN', ?)";
+            $audit_stmt = $conn->prepare($audit_sql);
+            $action_details = "Admin successfully verified and checked in Booking ID: {$booking_id}";
+            $audit_stmt->bind_param("is", $admin_id, $action_details);
+            $audit_stmt->execute();
+            // --------------------------------------------------
+            
             $message = "<div class='alert alert-success fw-bold p-4'>✅ Check-In Successful!<br><small class='fw-normal'>Booking ID #{$booking_id} has been verified.</small></div>";
         } elseif ($booking['status'] == 'Checked-In') {
             $message = "<div class='alert alert-warning fw-bold p-4'>⚠️ Already Checked In.<br><small class='fw-normal'>This pass was already scanned.</small></div>";

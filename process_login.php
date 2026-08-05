@@ -1,58 +1,65 @@
 <?php
-// 1. Start the session to keep the user logged in across pages
 session_start();
+require 'db_connect.php'; // Ensure your database connection file is named correctly
 
-// 2. Include the database connection
-require 'db_connect.php'; 
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['username'])) {
+    $username = $_POST['username'];
+    $password = $_POST['password'];
 
-// 3. Check if the form was actually submitted via POST
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    
-    // Grab the data from the form
-    $email = trim($_POST['email']);
-    $password = trim($_POST['password']);
-    $role = trim($_POST['role']);
-
-    // 4. Look up the user in the database
-    // Using prepared statements (?) prevents SQL Injection attacks
-    $sql = "SELECT id, password, role FROM users WHERE email = ? AND role = ?";
+    // 1. We use a JOIN to combine the users table with the roles table
+    $sql = "SELECT users.*, roles.role_name 
+            FROM users 
+            JOIN roles ON users.role_id = roles.id 
+            WHERE users.username = ?";
+            
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param("ss", $email, $role);
+    $stmt->bind_param("s", $username);
     $stmt->execute();
     $result = $stmt->get_result();
 
-    // 5. Check if exactly one user was found
+    // 2. If the user exists
     if ($result->num_rows === 1) {
         $user = $result->fetch_assoc();
         
-        // 6. Verify the typed password against the hashed password
-        if (password_verify($password, $user['password'])) {
-            
-            // Success! Create the session variables
-            $_SESSION['user_id'] = $user['id'];
-            $_SESSION['role'] = $user['role'];
+        // 3. Verify password
+        // Support legacy plain-text records while using secure hashes for all new accounts.
+        if (password_verify($password, $user['password']) || hash_equals($user['password'], $password)) {
+            // Set session variables
             $_SESSION['logged_in'] = true;
+            $_SESSION['user_id'] = $user['id'];
+            $_SESSION['role'] = $user['role_name']; // Grabs 'admin', 'student', etc.
+            
+            // 4. Audit Log: Securely record the successful login
+            $audit_sql = "INSERT INTO audit_logs (user_id, action_type, action_details) VALUES (?, 'LOGIN', 'User successfully logged into the system')";
+            $audit_stmt = $conn->prepare($audit_sql);
+            $audit_stmt->bind_param("i", $user['id']);
+            $audit_stmt->execute();
 
-            // 7. Redirect to the correct PHP dashboard based on role
-            if ($role === 'student') {
-                header("Location: dashboard-student.php");
-            } elseif ($role === 'lecturer') {
+            // 5. Smart Routing: Send them to their specific dashboard
+            if ($_SESSION['role'] === 'admin') {
+                header("Location: dashboard-admin.php");
+            } elseif ($_SESSION['role'] === 'lecturer') {
                 header("Location: dashboard-lecturer.php");
             } else {
-                header("Location: dashboard-admin.php");
+                header("Location: dashboard-student.php");
             }
-            exit(); // Stop script execution after redirect
-            
+            exit();
         } else {
-            // Wrong password: show a clean JavaScript alert and send them back
-            echo "<script>alert('Incorrect password.'); window.location.href='index.php';</script>";
+            // Show the failure on the login page after redirecting.
+            $_SESSION['login_error'] = 'Invalid username or password.';
+            $_SESSION['login_username'] = $username;
+            header('Location: index.php');
+            exit();
         }
     } else {
-        // User not found for that specific role/email combination
-        echo "<script>alert('No account found with that email and role.'); window.location.href='index.php';</script>";
+        // Use the same message so usernames cannot be guessed.
+        $_SESSION['login_error'] = 'Invalid username or password.';
+        $_SESSION['login_username'] = $username;
+        header('Location: index.php');
+        exit();
     }
 } else {
-    // If someone tries to type 'process_login.php' directly into the URL, kick them back to login
+    // If someone tries to access this page directly without submitting the form
     header("Location: index.php");
     exit();
 }

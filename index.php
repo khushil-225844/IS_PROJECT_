@@ -1,3 +1,10 @@
+<?php
+session_start();
+
+$login_error = $_SESSION['login_error'] ?? null;
+$username = $_SESSION['login_username'] ?? '';
+unset($_SESSION['login_error'], $_SESSION['login_username']);
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -22,26 +29,25 @@
     <div class="container d-flex justify-content-center align-items-center">
         <div class="card p-4 shadow-sm login-container w-100">
             <h3 class="text-center mb-4">System Login</h3>
+
+            <?php if ($login_error): ?>
+                <div class="alert alert-danger" role="alert">
+                    <?= htmlspecialchars($login_error, ENT_QUOTES, 'UTF-8') ?>
+                </div>
+            <?php endif; ?>
             
             <form action="process_login.php" method="POST">
                 <div class="mb-3">
-                    <label for="email" class="form-label text-secondary fw-bold">Email address</label>
-                    <input type="email" class="form-control" id="email" name="email" placeholder="name@strathmore.edu" required>
+                    <label for="username" class="form-label text-secondary fw-bold">Username</label>
+                    <input type="text" class="form-control" id="username" name="username" placeholder="e.g. StudentJohn" value="<?= htmlspecialchars($username, ENT_QUOTES, 'UTF-8') ?>" required>
                 </div>
                 
-                <div class="mb-3">
+                <div class="mb-4">
                     <label for="password" class="form-label text-secondary fw-bold">Password</label>
                     <input type="password" class="form-control" id="password" name="password" required>
                 </div>
                 
-                <div class="mb-4">
-                    <label for="role" class="form-label text-secondary fw-bold">Login As:</label>
-                    <select class="form-select" id="role" name="role" required>
-                        <option value="student">Student</option>
-                        <option value="lecturer">Lecturer</option>
-                        <option value="admin">Facility Administrator</option>
-                    </select>
-                </div>
+                <!-- Notice we deleted the Role Dropdown. The Database handles this now! -->
                 
                 <button type="submit" class="btn btn-primary w-100 fw-bold">Login</button>
             
@@ -49,6 +55,10 @@
                 <a href="forgot_password.php" class="text-decoration-none small text-muted">Forgot your password?</a>
                 </div>            
             </form>
+
+            <hr class="my-4">
+            <p class="text-center small text-muted mb-2">New to the system?</p>
+            <a href="signup.php" class="btn btn-outline-primary w-100">Request an Account</a>
             
         </div>
     </div>

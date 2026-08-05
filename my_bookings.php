@@ -2,7 +2,7 @@
 session_start();
 require 'db_connect.php';
 
-// THE NEW, UPGRADED BOUNCER
+// 1. Security Check: Block unauthorized roles
 if (!isset($_SESSION['logged_in']) || !in_array($_SESSION['role'], ['student', 'lecturer'])) {
     header("Location: index.php");
     exit();
@@ -10,6 +10,35 @@ if (!isset($_SESSION['logged_in']) || !in_array($_SESSION['role'], ['student', '
 
 $user_id = $_SESSION['user_id'];
 
+// Booking displacement notices are shown to the affected student on their account.
+$notification_sql = "SELECT id, message, created_at FROM notifications WHERE user_id = ? AND is_read = 0 ORDER BY created_at DESC";
+$notification_stmt = $conn->prepare($notification_sql);
+$notification_stmt->bind_param("i", $user_id);
+$notification_stmt->execute();
+$notifications = $notification_stmt->get_result();
+
+// 2. REAL-TIME AUTO-CANCELLATION SWEEP
+// Lock timezone to Nairobi and cancel any unverified passes older than 15 minutes
+date_default_timezone_set('Africa/Nairobi'); 
+$current_date = date('Y-m-d');
+$current_time = date('H:i:s');
+
+$cleanup_sql = "UPDATE bookings 
+                SET status = 'Cancelled (No-Show)' 
+                WHERE status = 'Confirmed' 
+                AND (
+                    booking_date < ? 
+                    OR 
+                    (booking_date = ? AND ADDTIME(start_time, '00:15:00') < ?)
+                )";
+                
+$cleanup_stmt = $conn->prepare($cleanup_sql);
+if ($cleanup_stmt) {
+    $cleanup_stmt->bind_param("sss", $current_date, $current_date, $current_time);
+    $cleanup_stmt->execute();
+}
+
+// 3. FETCH USER BOOKINGS FROM THE ENTERPRISE DATABASE
 $sql = "SELECT b.id, r.room_name, b.seat_number, b.booking_date, b.start_time, b.end_time, b.status, b.equipment, b.qr_code_path 
         FROM bookings b 
         JOIN rooms r ON b.room_id = r.id 
@@ -36,7 +65,7 @@ if ($stmt) {
 </head>
 <body class="bg-light pb-5">
 
-<?php
+    <?php
         // Determine user role for dynamic styling and links
         $nav_bg = ($_SESSION['role'] === 'lecturer') ? 'bg-dark' : 'bg-primary';
         $dash_link = ($_SESSION['role'] === 'lecturer') ? 'dashboard-lecturer.php' : 'dashboard-student.php';
@@ -59,7 +88,7 @@ if ($stmt) {
                         <a class="nav-link text-white px-3" href="rooms.php">Reserve Space</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link text-white px-3" href="my_bookings.php">My History</a>
+                        <a class="nav-link text-white px-3 fw-bold" href="my_bookings.php">My History</a>
                     </li>
                     <li class="nav-item ms-lg-3">
                         <a class="btn btn-danger btn-sm fw-bold px-3 py-2" href="logout.php">Logout</a>
@@ -72,12 +101,19 @@ if ($stmt) {
     <div class="container mt-5">
         <h2 class="fw-bold mb-4">My Booking History</h2>
 
+        <?php while ($notification = $notifications->fetch_assoc()): ?>
+            <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                <strong>Booking update:</strong> <?php echo htmlspecialchars($notification['message']); ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        <?php endwhile; ?>
+
         <div class="row">
             <?php
             if (isset($result) && $result->num_rows > 0) {
                 while($booking = $result->fetch_assoc()) {
                     
-                    // --- STATUS LOGIC ---
+                    // --- STATUS BADGE LOGIC ---
                     $raw_status = isset($booking['status']) ? $booking['status'] : 'Unknown';
                     
                     $badge_color = "bg-secondary";
@@ -92,6 +128,10 @@ if ($stmt) {
                         $badge_color = "bg-success";
                         $display_status = "✅ Booking Verified";
                         $show_qr = true; 
+                    } elseif (stripos($raw_status, 'Lecturer Priority') !== false) {
+                        $badge_color = "bg-danger";
+                        $display_status = "Cancelled (Lecturer Priority)";
+                        $show_qr = false;
                     } elseif (stripos($raw_status, 'Cancel') !== false) {
                         $badge_color = "bg-danger";
                         $display_status = "❌ Cancelled (Time Expired)";
@@ -124,7 +164,21 @@ if ($stmt) {
                     }
 
                     echo "
-                            </div>
+                            </div>";
+
+                    // Cancel button — only shown on bookings awaiting check-in (Confirmed, not yet verified)
+                    if (stripos($raw_status, 'Confirm') !== false) {
+                        echo "
+                            <div class='card-footer bg-white border-0 pb-3 px-3'>
+                                <a href='cancel_booking.php?id={$booking['id']}'
+                                   class='btn btn-outline-danger btn-sm w-100 fw-bold'
+                                   onclick=\"return confirm('Are you sure you want to cancel this booking?');\">
+                                   ❌ Cancel Booking
+                                </a>
+                            </div>";
+                    }
+
+                    echo "
                         </div>
                     </div>";
                 }
@@ -139,5 +193,7 @@ if ($stmt) {
             ?>
         </div>
     </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
