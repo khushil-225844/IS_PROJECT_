@@ -2,7 +2,8 @@
 session_start();
 require 'db_connect.php';
 
-// 1. Security Check: Block unauthorized roles
+// DEFENSE NOTE: Strict Role-Based Access Control (RBAC)
+// Why? We explicitly block 'admin' accounts or unauthenticated users from accessing this page. Admins have a global view in 'dashboard-admin.php', while this page is strictly isolated for individual students and lecturers to manage their own personal schedules.
 if (!isset($_SESSION['logged_in']) || !in_array($_SESSION['role'], ['student', 'lecturer'])) {
     header("Location: index.php");
     exit();
@@ -10,15 +11,16 @@ if (!isset($_SESSION['logged_in']) || !in_array($_SESSION['role'], ['student', '
 
 $user_id = $_SESSION['user_id'];
 
-// Booking displacement notices are shown to the affected student on their account.
+// DEFENSE NOTE: Real-Time Event Polling (Notifications)
+// Why? This implements a critical Functional Requirement. If a Lecturer uses their elevated privileges to lock down a room that a Student previously booked, the system generates a displacement notice. This query fetches those unread alerts so the student is immediately informed upon checking their history.
 $notification_sql = "SELECT id, message, created_at FROM notifications WHERE user_id = ? AND is_read = 0 ORDER BY created_at DESC";
 $notification_stmt = $conn->prepare($notification_sql);
 $notification_stmt->bind_param("i", $user_id);
 $notification_stmt->execute();
 $notifications = $notification_stmt->get_result();
 
-// 2. REAL-TIME AUTO-CANCELLATION SWEEP
-// Lock timezone to Nairobi and cancel any unverified passes older than 15 minutes
+// DEFENSE NOTE: Automated State Management (The 15-Minute Rule)
+// Why? We run the Auto-Cancellation Sweep right here on the user's page load. By forcing the server to check Nairobi time against the database before rendering the HTML, we guarantee the student is looking at 100% accurate, real-time data. If they load this page 16 minutes after their booking started and they haven't scanned in, they will watch their pass automatically switch to 'Cancelled (No-Show)'.
 date_default_timezone_set('Africa/Nairobi'); 
 $current_date = date('Y-m-d');
 $current_time = date('H:i:s');
@@ -38,7 +40,8 @@ if ($cleanup_stmt) {
     $cleanup_stmt->execute();
 }
 
-// 3. FETCH USER BOOKINGS FROM THE ENTERPRISE DATABASE
+// DEFENSE NOTE: Enterprise Relational JOIN (Read Process)
+// Why? To maintain 3NF (Third Normal Form) database integrity, the `bookings` table only stores the `room_id`. We use a SQL JOIN to dynamically pull the human-readable `room_name` from the `rooms` table. 
 $sql = "SELECT b.id, r.room_name, b.seat_number, b.booking_date, b.start_time, b.end_time, b.status, b.equipment, b.qr_code_path 
         FROM bookings b 
         JOIN rooms r ON b.room_id = r.id 
@@ -66,7 +69,8 @@ if ($stmt) {
 <body class="bg-light pb-5">
 
     <?php
-        // Determine user role for dynamic styling and links
+        // DEFENSE NOTE: Modular User Interface
+        // Why? This dynamically adjusts the navigation bar color based on the session role, providing clear visual feedback on the user's current privilege level without needing duplicate HTML files.
         $nav_bg = ($_SESSION['role'] === 'lecturer') ? 'bg-dark' : 'bg-primary';
         $dash_link = ($_SESSION['role'] === 'lecturer') ? 'dashboard-lecturer.php' : 'dashboard-student.php';
         $brand_text = ($_SESSION['role'] === 'lecturer') ? 'Strathmore Faculty' : 'Strathmore Booking';
@@ -101,6 +105,7 @@ if ($stmt) {
     <div class="container mt-5">
         <h2 class="fw-bold mb-4">My Booking History</h2>
 
+        <!-- Render Notifications (if any exist) -->
         <?php while ($notification = $notifications->fetch_assoc()): ?>
             <div class="alert alert-warning alert-dismissible fade show" role="alert">
                 <strong>Booking update:</strong> <?php echo htmlspecialchars($notification['message']); ?>
@@ -113,7 +118,8 @@ if ($stmt) {
             if (isset($result) && $result->num_rows > 0) {
                 while($booking = $result->fetch_assoc()) {
                     
-                    // --- STATUS BADGE LOGIC ---
+                    // DEFENSE NOTE: Dynamic Status Parsing & UI Logic
+                    // Why? We read the raw database string and use `stripos` (case-insensitive string position check) to determine the exact state of the booking. This determines the color of the UI badge, the text shown to the user, and most importantly, whether the QR code is displayed.
                     $raw_status = isset($booking['status']) ? $booking['status'] : 'Unknown';
                     
                     $badge_color = "bg-secondary";
@@ -129,15 +135,18 @@ if ($stmt) {
                         $display_status = "✅ Booking Verified";
                         $show_qr = true; 
                     } elseif (stripos($raw_status, 'Lecturer Priority') !== false) {
+                        // NFR handling for Lecturer Overrides
                         $badge_color = "bg-danger";
                         $display_status = "Cancelled (Lecturer Priority)";
                         $show_qr = false;
                     } elseif (stripos($raw_status, 'Cancel') !== false) {
+                        // Catch-all for No-Shows and User Cancellations
                         $badge_color = "bg-danger";
                         $display_status = "❌ Cancelled (Time Expired)";
                         $show_qr = false; 
                     }
                     
+                    // Display formatting for Lecturer entire-room lockouts (seat '0')
                     $seat_display = ($booking['seat_number'] == 0) ? "Entire Room" : "Seat " . $booking['seat_number'];
 
                     echo "
@@ -155,6 +164,8 @@ if ($stmt) {
                                     <p class='mb-0'><strong>Equipment:</strong> {$booking['equipment']}</p>
                                 </div>";
 
+                    // DEFENSE NOTE: The Digital-to-Physical Bridge (Module 4)
+                    // Why? If the booking is active ($show_qr is true) AND a path exists, we render the image. This is how the student physically verifies their digital reservation at the room door. If the pass is cancelled, we hide the QR code so they can't maliciously screenshot an old pass to trick the scanner.
                     if ($show_qr && !empty($booking['qr_code_path'])) {
                         echo "
                                 <div class='text-center ms-3 border p-2 rounded bg-white shadow-sm'>
@@ -166,10 +177,12 @@ if ($stmt) {
                     echo "
                             </div>";
 
-                    // Cancel button — only shown on bookings awaiting check-in (Confirmed, not yet verified)
+                    // DEFENSE NOTE: Logical Button Rendering
+                    // Why? The cancel button is ONLY shown if the booking is 'Confirmed' (Awaiting Check-in). If a student has already checked into the physical room (Verified) or the booking is already cancelled, we remove the cancel button to prevent database logic errors.
                     if (stripos($raw_status, 'Confirm') !== false) {
                         echo "
                             <div class='card-footer bg-white border-0 pb-3 px-3'>
+                                <!-- Note: This routes to cancel_booking.php, which contains our IDOR security check to ensure users can only delete their own data. -->
                                 <a href='cancel_booking.php?id={$booking['id']}'
                                    class='btn btn-outline-danger btn-sm w-100 fw-bold'
                                    onclick=\"return confirm('Are you sure you want to cancel this booking?');\">

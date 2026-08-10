@@ -1,8 +1,8 @@
 <?php
-// 1. Resume the session
+// DEFENSE NOTE: Session Management & Privilege Escalation Prevention
+// Why? We resume the session and immediately check if the user is explicitly an 'admin'. If a 'student' or 'lecturer' tries to type "dashboard-admin.php" in their URL bar, the system forcefully redirects them. This fulfills the Non-Functional Requirement (NFR) for Access Control.
 session_start();
 
-// 2. Security Check: Ensure the user is logged in AND is an 'admin'
 if (!isset($_SESSION['logged_in']) || $_SESSION['role'] !== 'admin') {
     header("Location: index.php");
     exit();
@@ -11,13 +11,16 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['role'] !== 'admin') {
 require 'db_connect.php';
 
 // --- BULLETPROOF AUTO-CANCELLATION ENGINE ---
-// 1. Force the server to lock onto your exact local time
+// DEFENSE NOTE: Time Synchronization
+// Why? We lock the PHP script to 'Africa/Nairobi' so that the server time matches Strathmore's physical timezone perfectly.
 date_default_timezone_set('Africa/Nairobi'); 
 
 $current_date = date('Y-m-d');
 $current_time = date('H:i:s');
 
-// 2. The logic: Cancel if the date is in the past, OR if it is today but (Start Time + 15 mins) is earlier than right now.
+// DEFENSE NOTE: Automated State Management (The 15-Minute Rule)
+// Why? This is a core functional requirement. Instead of relying on admins to manually cancel no-shows, this SQL query automatically sweeps the database. 
+// Logic: It targets 'Confirmed' bookings where either the date is in the past (< ?) OR the date is today but the start time plus 15 minutes is earlier than right now (ADDTIME < ?). This frees up abandoned campus resources dynamically.
 $cleanup_sql = "UPDATE bookings 
                 SET status = 'Cancelled (No-Show)' 
                 WHERE status = 'Confirmed' 
@@ -36,19 +39,20 @@ if ($stmt) {
 
 // --- Analytics Queries ---
 
-// Query A: Count total registered users
+// DEFENSE NOTE: SQL Aggregate Functions
+// Why? We use the COUNT(*) function to quickly aggregate massive amounts of data without pulling every single row into PHP's memory. This is highly efficient and scalable.
 $user_query = $conn->query("SELECT COUNT(*) as count FROM users");
 $total_users = $user_query->fetch_assoc()['count'];
 
-// Query B: Count total rooms in the database
 $room_query = $conn->query("SELECT COUNT(*) as count FROM rooms");
 $total_rooms = $room_query->fetch_assoc()['count'];
 
-// Query C: Count total confirmed bookings
 $booking_query = $conn->query("SELECT COUNT(*) as count FROM bookings WHERE status = 'Confirmed'");
 $total_bookings = $booking_query->fetch_assoc()['count'];
 
-// Query D: Fetch the 5 most recent bookings across the entire university (ENTERPRISE JOIN UPGRADE)
+// DEFENSE NOTE: 3NF Database Normalization & 4-Table JOIN
+// Why? To prove our database is in Third Normal Form (3NF), we do not store redundant data (like usernames or role names) inside the bookings table. 
+// Instead, we use a complex relational JOIN query. We pull the raw booking data, join the 'rooms' table for the room name, join the 'users' table for the username, and join the 'roles' table for the role name. This ensures perfect data integrity.
 $recent_sql = "SELECT b.id, b.booking_date, b.start_time, b.status, r.room_name, u.username, ro.role_name 
                FROM bookings b
                JOIN rooms r ON b.room_id = r.id
@@ -63,11 +67,14 @@ $recent_bookings = $conn->query($recent_sql);
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard - Strathmore Room Booking</title>
+    <!-- DEFENSE NOTE: Bootstrap 5 CDN -->
+    <!-- Why? We use a Content Delivery Network (CDN) to pull in Bootstrap for a responsive, mobile-first design without bloating our local server storage. -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body class="bg-light">
 
-<nav class="navbar navbar-expand-lg navbar-dark bg-danger shadow-sm mb-4">
+    <!-- Navbar Section -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-danger shadow-sm mb-4">
         <div class="container">
             <a class="navbar-brand fw-bold" href="dashboard-admin.php">Strathmore Admin</a>
             
@@ -102,6 +109,7 @@ $recent_bookings = $conn->query($recent_sql);
             </div>
         </div>
 
+        <!-- Dashboard Stat Cards -->
         <div class="row g-4 mb-5">
             <div class="col-md-4">
                 <div class="card shadow-sm border-0 bg-primary text-white h-100">
@@ -129,10 +137,12 @@ $recent_bookings = $conn->query($recent_sql);
             </div>
         </div>
 
+        <!-- Recent Activity Table -->
         <div class="card shadow-sm border-0">
             <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
                 <h5 class="mb-0 text-danger fw-bold">Recent Booking Activity</h5>
                 <div>
+                    <!-- DEFENSE NOTE: Navigation Routing -->
                     <a href="scan.php" class="btn btn-sm btn-success shadow-sm fw-bold me-2">📷 QR Scanner</a>
                     <a href="system_reports.php" class="btn btn-sm btn-dark shadow-sm fw-bold me-2">📊 Analytics</a>
                     <a href="manage_users.php" class="btn btn-sm btn-outline-dark shadow-sm fw-bold me-2">Users</a>
@@ -154,13 +164,16 @@ $recent_bookings = $conn->query($recent_sql);
                         </thead>
                         <tbody>
                             <?php
+                            // DEFENSE NOTE: Data Rendering and Conditional Formatting
                             if ($recent_bookings && $recent_bookings->num_rows > 0) {
                                 while($row = $recent_bookings->fetch_assoc()) {
-                                    // Set badge color based on status
+                                    
+                                    // DEFENSE NOTE: String Search Function (stripos)
+                                    // Why? Instead of hardcoding every possible cancellation status ('Cancelled', 'Cancelled (No-Show)'), we use PHP's 'stripos' to check if the word "Cancel" exists anywhere in the status string. If it does, we dynamically turn the UI badge red (bg-danger).
                                     $badge = 'bg-success';
                                     if (stripos($row['status'], 'Cancel') !== false) $badge = 'bg-danger';
                                     
-                                    // Format the date/time
+                                    // Format the date/time into a human-readable format
                                     $time_str = date("M j, Y", strtotime($row['booking_date'])) . " @ " . date("g:i A", strtotime($row['start_time']));
                                     
                                     echo "<tr>

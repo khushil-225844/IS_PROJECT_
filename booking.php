@@ -1,8 +1,13 @@
 <?php
 session_start();
 require 'db_connect.php';
+
+// DEFENSE NOTE: Timezone synchronization. 
+// Why? We force the server to Africa/Nairobi so that when we compare the booking request time against "now", we don't accidentally block valid bookings due to server-local time mismatches.
 date_default_timezone_set('Africa/Nairobi');
 
+// DEFENSE NOTE: Role-Based Access Control (RBAC). 
+// Why? This prevents unauthenticated users (or system Admins who shouldn't be booking seats) from accessing this transaction page.
 if (!isset($_SESSION['logged_in']) || !in_array($_SESSION['role'], ['student', 'lecturer'])) {
     header("Location: index.php");
     exit();
@@ -11,7 +16,8 @@ if (!isset($_SESSION['logged_in']) || !in_array($_SESSION['role'], ['student', '
 $user_role = $_SESSION['role']; 
 $room_id = isset($_GET['room_id']) ? intval($_GET['room_id']) : 0;
 
-// --- ENTERPRISE SQL UPDATE: JOINING ROOMS & INVENTORY ---
+// DEFENSE NOTE: Enterprise Database Join.
+// Why? Instead of querying the rooms table and the equipment table separately, we use a LEFT JOIN to stitch them together based on the room_id. GROUP_CONCAT aggregates multiple hardware items (like a TV and a Projector) into a single comma-separated list.
 $room_sql = "SELECT rooms.room_name, rooms.capacity, 
              IFNULL(GROUP_CONCAT(equipment_inventory.asset_name SEPARATOR ', '), 'None') as equipment_list 
              FROM rooms 
@@ -29,7 +35,7 @@ if (!$room) {
 }
 
 $capacity = $room['capacity'];
-$room_equipment = $room['equipment_list']; // Grabbed from the new joined column
+$room_equipment = $room['equipment_list']; 
 $occupied_seats = [];
 $date_selected = false;
 $room_locked_for_lecture = false;
@@ -37,6 +43,8 @@ $equipment_taken = false;
 $booking_error = '';
 $today = date('Y-m-d');
 
+// DEFENSE NOTE: The Booking Conflict Engine.
+// Why? When the user submits a date and time range, this block executes before allowing them to see the seat grid.
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
     $booking_date = $_POST['booking_date'] ?? '';
     $start_time = $_POST['start_time'] ?? '';
@@ -44,6 +52,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
     $requested_start = DateTime::createFromFormat('Y-m-d H:i', "$booking_date $start_time");
     $requested_end = DateTime::createFromFormat('Y-m-d H:i', "$booking_date $end_time");
 
+    // Boundary Testing: Ensure times are valid, within operational hours (08:00 to 20:00), and not in the past.
     if (!$requested_start || !$requested_end || $requested_end <= $requested_start) {
         $booking_error = 'Please choose a valid time range.';
     } elseif ($start_time < '08:00' || $end_time > '20:00') {
@@ -53,7 +62,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
     } else {
         $date_selected = true;
 
-        // This query is still perfect because the bookings table kept its structure!
+        // DEFENSE NOTE: Conflict Detection Query.
+        // Why? We use a time-overlap logic: (existing_start < requested_end AND existing_end > requested_start). This accurately finds ANY intersecting bookings in the database for that specific room and date.
         $check_sql = "SELECT seat_number, equipment FROM bookings
                       WHERE room_id = ? AND booking_date = ? AND status = 'Confirmed'
                       AND (start_time < ? AND end_time > ?)";
@@ -63,11 +73,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
         $result = $check_stmt->get_result();
         
         while ($row = $result->fetch_assoc()) {
+            // DEFENSE NOTE: Lecturer Override Detection.
+            // Why? If we detect seat_number '0', it means a Lecturer locked the entire room. We flip a boolean to block the whole grid.
             if ($row['seat_number'] == 0) {
                 $room_locked_for_lecture = true;
             }
-            $occupied_seats[] = $row['seat_number'];
+            $occupied_seats[] = $row['seat_number']; // Push occupied seats into an array
 
+            // Detect if shared hardware is already claimed for this time slot
             if ($row['equipment'] !== 'None') {
                 $equipment_taken = true;
             }
@@ -96,7 +109,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
 <body class="bg-light pb-5">
 
     <?php
-        // Determine user role for dynamic styling and links
+        // Determine user role for dynamic styling and dashboard routing
         $nav_bg = ($_SESSION['role'] === 'lecturer') ? 'bg-dark' : 'bg-primary';
         $dash_link = ($_SESSION['role'] === 'lecturer') ? 'dashboard-lecturer.php' : 'dashboard-student.php';
         $brand_text = ($_SESSION['role'] === 'lecturer') ? 'Strathmore Faculty' : 'Strathmore Booking';
@@ -127,9 +140,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
             </div>
         </div>
     </nav>
-        <div class="container mt-5">
+        
+    <div class="container mt-5">
         <h2 class="text-center mb-1">Book <?php echo $room['room_name']; ?></h2>
         <p class="text-muted text-center mb-5">Total Capacity: <?php echo $capacity; ?> Seats</p>
+        
+        <!-- DEFENSE NOTE: Time Selection Form -->
         <div class="card shadow-sm border-0 mb-4 mx-auto" style="max-width: 600px;">
             <div class="card-body p-4">
                 <?php if ($booking_error): ?>
@@ -152,10 +168,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
             <div class="card-body p-5">
                 
                 <?php if ($room_locked_for_lecture): ?>
+                    <!-- DEFENSE NOTE: Lecturer Override Lockout UI -->
                     <div class="alert alert-danger text-center p-4"><h4>🔒 Room Unavailable</h4><p>This entire room has been reserved for a lecture.</p></div>
                 <?php else: ?>
                     
                     <?php if ($user_role === 'lecturer'): ?>
+                        <!-- DEFENSE NOTE: Lecturer Privilege View -->
+                        <!-- Why? We hide the individual seat grid and provide a single button that sets the hidden seat_number input to '0'. -->
                         <div class="alert alert-info text-center p-4 mb-5 border-info">
                             <h4 class="fw-bold text-info-emphasis mb-3">🎓 Lecturer Access</h4>
                             <p class="text-dark">You have authorization to bypass individual seat selection and lock down this entire space.</p>
@@ -164,6 +183,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
                             </button>
                         </div>
                     <?php else: ?>
+                        <!-- DEFENSE NOTE: Dynamic Seat Grid (Students) -->
+                        <!-- Why? A PHP loop generates boxes up to the room's total capacity. If the box's number exists in our $occupied_seats array, we render it red. Otherwise, we render it green with an onclick listener. -->
                         <h5 class="card-title fw-bold mb-4 text-center">Select Your Seat(s)</h5>
                         <div class="cinema-screen">FRONT OF ROOM / BOARD</div>
                         
@@ -182,6 +203,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
 
                     <hr class="mb-4">
 
+                    <!-- DEFENSE NOTE: Dynamic Equipment Allocation UI -->
                     <?php if ($room_equipment !== 'None'): ?>
                         <div class="text-center mb-5">
                             <h5 class="fw-bold mb-3 text-dark">Shared Room Resources</h5>
@@ -198,6 +220,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
                         </div>
                     <?php endif; ?>
 
+                    <!-- DEFENSE NOTE: Final Hidden Form -->
+                    <!-- Why? When users click seats or equipment on the screen, JavaScript updates the hidden input fields below. When 'Confirm' is clicked, this data is POSTed to submit_booking.php. -->
                     <form method="POST" action="submit_booking.php" id="finalBookingForm">
                         <input type="hidden" name="room_id" value="<?php echo $room_id; ?>">
                         <input type="hidden" name="booking_date" value="<?php echo $booking_date; ?>">
@@ -216,7 +240,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
         <?php endif; ?>
     </div>
 
+    <!-- DEFENSE NOTE: Client-Side JS Boundary Validation -->
     <script>
+        // Prevents users from selecting a start time in the past if booking for today.
         const bookingDate = document.getElementById('booking_date');
         const startTime = document.querySelector('input[name="start_time"]');
         const now = new Date();
@@ -233,12 +259,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
         updateEarliestStartTime();
     </script>
 
+    <!-- DEFENSE NOTE: Interactive JS Grid Logic -->
     <script>
         let selectedSeats = [];
-        const MAX_SEATS = 10;
+        const MAX_SEATS = 10; // Boundary Value Constraint
         let equipmentSelected = 'None';
 
-        // Student Multi-Seat Logic
+        // Student Multi-Seat Logic: Toggles seat color and updates the hidden input array.
         function selectSeat(seatNumber, element) {
             const index = selectedSeats.indexOf(seatNumber);
             if (index > -1) {
@@ -265,7 +292,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['check_time'])) {
             }
         }
 
-        // NEW: Lecturer Full Room Logic
+        // Lecturer Full Room Logic: Injects "0" into the hidden seat input, which the backend recognizes as a full-room lockout.
         function selectEntireRoom() {
             document.getElementById('selected_seat_input').value = "0";
             

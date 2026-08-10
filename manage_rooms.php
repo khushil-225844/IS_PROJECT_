@@ -2,35 +2,40 @@
 session_start();
 require 'db_connect.php';
 
-// Security Check: Ensure the user is an admin
+// DEFENSE NOTE: Admin-Only Routing
+// Why? Facility management is a high-privilege action. This ensures no students or lecturers can accidentally or maliciously add, update, or delete physical campus resources.
 if (!isset($_SESSION['logged_in']) || $_SESSION['role'] !== 'admin') {
     header("Location: index.php");
     exit();
 }
 
 $message = "";
-$admin_id = $_SESSION['user_id']; // For the Audit Log
+$admin_id = $_SESSION['user_id']; // Captured specifically for the Audit Log
 
-// Handle Form Submissions
+// DEFENSE NOTE: Multi-Action Controller
+// Why? Instead of creating three separate PHP files (add_room.php, update_room.php, delete_room.php), we use a hidden 'action' input in our HTML forms. This single PHP block acts as a controller, detecting which form was submitted and executing the corresponding CRUD operation.
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     
-    // Action 1: Add a Brand New Room (ENTERPRISE UPGRADE)
+    // --- CREATE (C) PROCESS ---
     if (isset($_POST['action']) && $_POST['action'] == 'add_room') {
         $room_name = trim($_POST['room_name']);
         $capacity = intval($_POST['capacity']);
         $room_type = $_POST['room_type'];
         $equipment = $_POST['equipment']; 
         
-        // 1. Insert into the rooms table
+        // Step 1: Insert into the core 'rooms' table
         $sql = "INSERT INTO rooms (room_name, capacity, room_type, status) VALUES (?, ?, ?, 'Available')";
         $stmt = $conn->prepare($sql);
         
         if ($stmt) {
             $stmt->bind_param("sis", $room_name, $capacity, $room_type);
             if ($stmt->execute()) {
-                $new_room_id = $conn->insert_id; // Grab the new Room ID
                 
-                // 2. Insert into equipment_inventory table if hardware was selected
+                // DEFENSE NOTE: Multi-Table Transaction
+                // Why? We use $conn->insert_id to immediately grab the auto-generated ID of the room we just created. We need this ID to link the hardware in our normalized database structure.
+                $new_room_id = $conn->insert_id; 
+                
+                // Step 2: Insert into 'equipment_inventory' table 
                 if ($equipment !== 'None') {
                     $eq_sql = "INSERT INTO equipment_inventory (room_id, asset_name, status) VALUES (?, ?, 'Functional')";
                     $eq_stmt = $conn->prepare($eq_sql);
@@ -38,7 +43,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     $eq_stmt->execute();
                 }
 
-                // 3. Security Tracking (Audit Log)
+                // Step 3: Write to the immutable 'audit_logs' table for security tracking
                 $audit_sql = "INSERT INTO audit_logs (user_id, action_type, action_details) VALUES (?, 'ROOM_ADDED', ?)";
                 $audit_stmt = $conn->prepare($audit_sql);
                 $action_details = "Created {$room_type}: {$room_name} (Capacity: {$capacity})";
@@ -54,7 +59,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
     }
     
-    // Action 2: Update an Existing Room's Status
+    // --- UPDATE (U) PROCESS ---
     if (isset($_POST['action']) && $_POST['action'] == 'update_status') {
         $room_id = intval($_POST['room_id']);
         $new_status = $_POST['new_status'];
@@ -64,7 +69,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $stmt->bind_param("si", $new_status, $room_id);
         
         if ($stmt->execute()) {
-            // Security Tracking (Audit Log)
+            // Write to the immutable 'audit_logs' table for security tracking
             $audit_sql = "INSERT INTO audit_logs (user_id, action_type, action_details) VALUES (?, 'ROOM_STATUS_UPDATE', ?)";
             $audit_stmt = $conn->prepare($audit_sql);
             $action_details = "Updated room ID {$room_id} status to '{$new_status}'";
@@ -75,18 +80,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
     }
 
-    // Action 3: Permanently Delete a Room
+    // --- DELETE (D) PROCESS ---
     if (isset($_POST['action']) && $_POST['action'] == 'delete_room') {
         $room_id = intval($_POST['room_id']);
         
-        // Note: Because we used ON DELETE CASCADE in the database schema, 
-        // deleting the room will automatically delete its equipment from the inventory!
+        // DEFENSE NOTE: Foreign Key Cascade Deletion
+        // Why? We only have to delete the room from the `rooms` table. Because we set up `ON DELETE CASCADE` in our MySQL schema, the database will automatically hunt down and delete any associated hardware in the `equipment_inventory` table or logs in the `bookings` table. This prevents "orphaned data" and maintains perfect referential integrity.
         $sql = "DELETE FROM rooms WHERE id = ?";
         $stmt = $conn->prepare($sql);
         $stmt->bind_param("i", $room_id);
         
         if ($stmt->execute()) {
-            // Security Tracking (Audit Log)
+            // Write to the immutable 'audit_logs' table for security tracking
             $audit_sql = "INSERT INTO audit_logs (user_id, action_type, action_details) VALUES (?, 'ROOM_DELETED', ?)";
             $audit_stmt = $conn->prepare($audit_sql);
             $action_details = "Permanently deleted room ID {$room_id} and its associated hardware.";
@@ -98,7 +103,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     }
 }
 
-// Fetch all current rooms for the table (ENTERPRISE JOIN)
+// --- READ (R) PROCESS ---
+// DEFENSE NOTE: Relational Data Stitching (Enterprise JOIN)
+// Why? To display a user-friendly table, we must query the `rooms` table and JOIN it with the `equipment_inventory` table. We use GROUP_CONCAT so that if a room has 3 pieces of hardware, it displays as one neat, comma-separated string rather than generating 3 duplicate rows in our HTML table.
 $rooms_sql = "SELECT rooms.*, 
               IFNULL(GROUP_CONCAT(equipment_inventory.asset_name SEPARATOR ', '), 'None') as equipment_list 
               FROM rooms 
@@ -116,7 +123,8 @@ $rooms_result = $conn->query($rooms_sql);
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body class="bg-light">
-<nav class="navbar navbar-expand-lg navbar-dark bg-danger shadow-sm mb-4">
+    <!-- Admin Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-danger shadow-sm mb-4">
         <div class="container">
             <a class="navbar-brand fw-bold" href="dashboard-admin.php">Strathmore Admin</a>
             
@@ -153,6 +161,8 @@ $rooms_result = $conn->query($rooms_sql);
         </div>
 
         <div class="row">
+            <!-- DEFENSE NOTE: The Create Form -->
+            <!-- Why? This panel captures data to build the physical constraints of our campus (Capacity, Hardware, Type). This data acts as the boundary rules for the student booking engine later on. -->
             <div class="col-md-4 mb-4">
                 <div class="card shadow-sm border-0">
                     <div class="card-header bg-dark text-white fw-bold py-3">+ Add New Room</div>
@@ -192,6 +202,8 @@ $rooms_result = $conn->query($rooms_sql);
                 </div>
             </div>
 
+            <!-- DEFENSE NOTE: The Master Directory Table -->
+            <!-- Why? This table dynamically renders the results of our READ query. It also houses the UPDATE and DELETE forms for each specific room row. -->
             <div class="col-md-8">
                 <div class="card shadow-sm border-0">
                     <div class="card-header bg-white py-3">
@@ -216,7 +228,8 @@ $rooms_result = $conn->query($rooms_sql);
                                         while($room = $rooms_result->fetch_assoc()) {
                                             $badge = ($room['status'] == 'Available') ? 'bg-success' : 'bg-warning text-dark';
                                             
-                                            // Enterprise Hardware Formatting
+                                            // DEFENSE NOTE: UX Formatting
+                                            // Why? We use str_replace to turn raw database strings ('Television') into visually appealing icons ('📺 TV') for the end-user interface without altering the actual data stored on the server.
                                             $eq_display = "<span class='text-muted'>None</span>";
                                             if ($room['equipment_list'] !== 'None') {
                                                 $display_str = str_replace('Television', '📺 TV', $room['equipment_list']);
@@ -233,6 +246,7 @@ $rooms_result = $conn->query($rooms_sql);
                                                     <td class='text-end'>
                                                         <div class='d-flex justify-content-end gap-2'>
                                                             
+                                                            <!-- DEFENSE NOTE: Inline UPDATE Form -->
                                                             <form method='POST' class='d-flex gap-1'>
                                                                 <input type='hidden' name='action' value='update_status'>
                                                                 <input type='hidden' name='room_id' value='{$room['id']}'>
@@ -243,6 +257,8 @@ $rooms_result = $conn->query($rooms_sql);
                                                                 <button type='submit' class='btn btn-sm btn-outline-dark'>Update</button>
                                                             </form>
 
+                                                            <!-- DEFENSE NOTE: Inline DELETE Form (With Boundary Validation) -->
+                                                            <!-- Why? We use a client-side JavaScript 'onsubmit' confirm dialog to prevent accidental deletion of critical infrastructure. -->
                                                             <form method='POST' onsubmit=\"return confirm('WARNING: Are you absolutely sure you want to permanently delete {$room['room_name']}?');\">
                                                                 <input type='hidden' name='action' value='delete_room'>
                                                                 <input type='hidden' name='room_id' value='{$room['id']}'>

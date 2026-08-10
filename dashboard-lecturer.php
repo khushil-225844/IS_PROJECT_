@@ -1,8 +1,10 @@
 <?php
-// Resume the session
+// DEFENSE NOTE: Session Initialization
+// Why? We must resume the active session before we can read any of the user's stored data (like their role or user_id).
 session_start();
 
-// Security Check: Ensure the user is logged in AND has the 'lecturer' role
+// DEFENSE NOTE: Strict Role-Based Access Control (RBAC)
+// Why? This prevents "Privilege Escalation". Even if a student discovers the URL "dashboard-lecturer.php" and types it into their browser, this IF statement checks their session role. Since they are a 'student' and not a 'lecturer', the system instantly kicks them back to the login page (index.php).
 if (!isset($_SESSION['logged_in']) || $_SESSION['role'] !== 'lecturer') {
     header("Location: index.php");
     exit();
@@ -15,12 +17,15 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['role'] !== 'lecturer') {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Faculty Dashboard - Strathmore Room Booking</title>
     
+    <!-- DEFENSE NOTE: Front-End Framework -->
+    <!-- Why? We use Bootstrap 5 via CDN to ensure the dashboard is mobile-responsive and visually consistent without requiring us to write thousands of lines of custom CSS. -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body class="bg-light">
 
 <?php
-        // Determine user role for dynamic styling and links
+        // DEFENSE NOTE: Dynamic UI Rendering
+        // Why? We use the $_SESSION variable to dynamically change the user interface. For lecturers, the navigation bar turns dark (bg-dark) and displays "Strathmore Faculty". If we ever decided to merge the student and lecturer dashboards into one file, this logic makes the UI modular and reusable.
         $nav_bg = ($_SESSION['role'] === 'lecturer') ? 'bg-dark' : 'bg-primary';
         $dash_link = ($_SESSION['role'] === 'lecturer') ? 'dashboard-lecturer.php' : 'dashboard-student.php';
         $brand_text = ($_SESSION['role'] === 'lecturer') ? 'Strathmore Faculty' : 'Strathmore Booking';
@@ -51,6 +56,9 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['role'] !== 'lecturer') {
             </div>
         </div>
     </nav>
+
+    <!-- DEFENSE NOTE: User Workflow & System Routing -->
+    <!-- Why? This dashboard acts as the central router for the Lecturer's user journey. We break their capabilities down into clear Call-to-Action (CTA) cards guiding them to the Booking Engine (Create) or their History (Read/Update/Delete). -->
     <div class="container mt-5">
         <div class="row">
             <div class="col-12">
